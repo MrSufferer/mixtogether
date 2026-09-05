@@ -146,7 +146,7 @@ SEPOLIA_RPC_URL=… POOL_ADDRESS=… KEEPER_PRIVATE_KEY=… pnpm keeper -- --wat
 - The production dependency audit reports no known vulnerabilities; pinned Hardhat/Zama development tooling retains documented transitive advisories.
 - The Vercel preview is live with COOP `same-origin` and COEP `require-corp`.
 - Sepolia token validation passes; pool deployment is pending a funded, non-test deployer.
-- GitHub publication is pending renewed `gh` authentication.
+- GitHub source repository is published publicly at <https://github.com/MrSufferer/mixtogether> with passing CI.
 
 See [the submission checklist](docs/submission-checklist.md) for the exact release blockers and [the demo script](docs/demo-video-script.md) for a sub-three-minute walkthrough.
 

@@ -19,7 +19,7 @@ status: in-progress
 - [x] Rotate the reserve handle on guardian acceptance so the former guardian cannot retain access to current state.
 - [x] Liability backing, principal segregation, award restoration, and exactly-one-credit invariants.
 - [x] Exhaustive 65-wallet boundary and deployed cross-wallet ACL tests (`packages/contracts/test/MixTogetherPool.ts` tests `rejects the 65th saver with RegistryFull` and `denies another saver user-decrypt of foreign principal and winnings`).
-- [x] Fail-closed Sepolia resolver: empty accounts on missing/empty key, present hex key array, no public mnemonic fallback, RPC/Etherscan env resolution (`packages/contracts/scripts/load-env.test.ts`, 7 unit tests).
+- [x] Fail-closed Sepolia resolver: empty accounts on missing/empty key, present hex key array, no public mnemonic fallback, RPC/Etherscan env resolution (`packages/contracts/test/load-env.ts`, 8 unit tests in Hardhat suite).
 ## Web tests
 
 - [x] Number formatting: zero, null, signed zero, tiny amount, zero-subscript, and abbreviation.
@@ -40,7 +40,7 @@ Local unit, contract, build, and browser gates are rerun immediately before hand
 
 ## Handoff evidence — 2026-09-05
 
-- `pnpm check`: passed; 22 contract/resolver tests (7 unit + 15 contract) and 13 web unit tests.
+- `pnpm check`: passed; 23 contract tests (15 pool + 8 resolver) and 13 web unit tests.
 - `pnpm build`: passed with Solidity `0.8.27` and Vite `7.3.5`.
 - `pnpm test:e2e`: passed; six desktop/mobile Chromium checks (4 preview + 2 connected saver journey).
 - `pnpm audit --prod --audit-level high`: no known vulnerabilities.
@@ -50,12 +50,12 @@ Local unit, contract, build, and browser gates are rerun immediately before hand
 ## Phase 5 evidence — 2026-09-05
 
 - Contract targeted regression: 3 passing tests covering OPEN withdrawal retention, finalized pruning, selection eligibility, redeposit cancellation, and mixed pending/matured pruning batches.
-- Resolver regression: 7 passing unit tests in `packages/contracts/scripts/load-env.test.ts` asserting fail-closed Sepolia accounts, hex key extraction, zero mnemonic leakage, and RPC/Etherscan env resolution.
+- Resolver regression: 8 passing tests in `packages/contracts/test/load-env.ts` asserting fail-closed Sepolia accounts, hex key extraction, zero mnemonic leakage, and RPC/Etherscan env resolution.
 - Web targeted regression: 5 passing tests covering canonical transaction hashes and privacy-safe draw labels/copy helpers.
 - ABI export completed after the public `exitDrawId(address)` interface addition.
 - Remaining release evidence is blocked on funded Sepolia deployment and live HCU/two-wallet execution.
 ## Phase 8/9 result — 2026-09-05
 
 - Coverage additions are linked to `packages/contracts/test/MixTogetherPool.ts`, `apps/web/src/lib/transaction.test.ts`, `apps/web/src/lib/draw.test.ts`, and `apps/web/e2e/dashboard.spec.ts`.
-- Full local gates are green: 22 contract/resolver tests, 13 web unit tests, 6 Playwright checks (4 preview + 2 connected saver journey), production build, production audit, and whitespace validation.
+- Full local gates are green: 23 contract tests, 13 web unit tests, 6 Playwright checks (4 preview + 2 connected saver journey), production build, production audit, and whitespace validation.
 - No new local coverage gap was found for the changed behaviors; Sepolia-only HCU, two-wallet, and publication checks remain explicitly blocked release tasks.

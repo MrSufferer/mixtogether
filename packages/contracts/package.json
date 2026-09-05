@@ -7,7 +7,7 @@
     "clean": "hardhat clean",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test scripts/load-env.test.ts && hardhat test",
+    "test": "hardhat test",
     "coverage": "hardhat coverage",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
     "validate:sepolia": "hardhat run scripts/validate-token.ts --network sepolia",
