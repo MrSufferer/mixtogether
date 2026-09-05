@@ -48,7 +48,7 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 
 ## Phase 5 status — 2026-09-05
 
-- Done: repo-root gitignored `.env` loading with resolver unit tests (`scripts/load-env.test.ts`), Hardhat config fail-closed accounts, keeper env loading, and Vite `envDir` sharing.
+- Done: repo-root gitignored `.env` loading with resolver unit tests (`packages/contracts/test/load-env.ts`), Hardhat config fail-closed accounts, keeper env loading, and Vite `envDir` sharing.
 - Blocked: Sepolia deployment, 100 cUSDC reserve funding, and live eight-slot HCU + two-wallet smoke tests remain blocked until operator enters funded `DEPLOYER_PRIVATE_KEY` in `.env`.
 - Done: created public GitHub repository `MrSufferer/mixtogether`, pushed `feat/mixtogether`, verified `isPrivate=false`, and confirmed CI started.
 
