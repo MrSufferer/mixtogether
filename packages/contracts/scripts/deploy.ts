@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { vars } from "hardhat/config";
 import { ethers, network, run } from "hardhat";
 import { validateOfficialPair } from "./validate-token";
 
@@ -45,7 +46,7 @@ async function main() {
   );
   console.log(JSON.stringify(record, null, 2));
 
-  if (process.env.ETHERSCAN_API_KEY) {
+  if (vars.get("ETHERSCAN_API_KEY", "")) {
     await run("verify:verify", {
       address,
       constructorArguments: [validation.wrapper, guardian],
