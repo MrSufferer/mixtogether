@@ -41,4 +41,4 @@ The pool is immutable and non-upgradeable. A broken deployment is superseded by 
 - Pool deployment was not attempted because `DEPLOYER_PRIVATE_KEY` is not yet populated in the gitignored `.env`. Live-network configuration intentionally fails closed with empty accounts.
 - Vercel preview `dpl_2qLycQXuUQqe1QxZKXe7QSAaYfox` reached `READY` at <https://web-5wg8kthck-gadillacers-projects.vercel.app>.
 - The preview returned HTTP 200 with COOP `same-origin`, COEP `require-corp`, HSTS, `nosniff`, and strict-origin referrer policy headers, and loaded without application console errors.
-- GitHub source publication is unblocked; `gh auth status` confirms valid authentication as `MrSufferer`.
+- GitHub source publication is complete; public repository is live at <https://github.com/MrSufferer/mixtogether> with active CI on `feat/mixtogether`.

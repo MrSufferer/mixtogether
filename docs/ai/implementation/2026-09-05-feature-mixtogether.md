@@ -28,6 +28,7 @@ status: in-progress
 - 2026-09-05: added exhaustive 65-wallet boundary (`RegistryFull`) and cross-wallet ACL tests; fixed `MixTogetherPool.sol` `_zeroFor` initialization to generate distinct private zero handles using random zero values (`FHE.sub(r, r)` with `r = FHE.randEuint64()`), eliminating an ACL leak where registered savers shared deterministic `FHE.asEuint64(0)` allowances.
 - 2026-09-05: implemented mocked Playwright connected saver journey across desktop and mobile Chromium with in-page FSM store, minimal EIP-1193 chain transport, and Zama SDK mock aliases under `VITE_E2E_MOCK=1` on dedicated port 4174; verified zero mock leakage into production build.
 - 2026-09-05: implemented repo-root gitignored `.env` loading for Hardhat, keeper, and Vite (`envDir`) with resolver unit tests; confirmed fail-closed Sepolia account configuration and scaffolded gitignored `.env` template.
+- 2026-09-05: created public GitHub repository `MrSufferer/mixtogether` and pushed `feat/mixtogether`; confirmed `isPrivate=false` and CI workflow trigger.
 ## Decisions
 
 - Use the official cUSDC mock pair; custom faucet/wrapper is a deployment-only fallback after an explicit failed validation.
@@ -41,7 +42,7 @@ status: in-progress
 - An encrypted-zero callback is accepted as required and may consume one of the bounded registry slots because Solidity cannot branch on its private value.
 - A live pool address, source verification, prize funding, and deployed two-wallet/HCU smoke test remain pending a funded Sepolia deployer key entered in the gitignored `.env`.
 - GitHub CLI credential is authenticated as `MrSufferer`; public repository creation and push is unblocked.
-- The configured AI DevKit lint still reports only the documented branch-name deviation (`feat/mixtogether` vs `feature-mixtogether`).
+- GitHub repository `MrSufferer/mixtogether` is created and public at <https://github.com/MrSufferer/mixtogether>; CI is active on `feat/mixtogether`.
 - Live Sepolia deployment, HCU receipts, and reserve funding remain blocked by external deployer key funding and are not claimed as locally complete.
 ## Phase 7 alignment review — 2026-09-05
 

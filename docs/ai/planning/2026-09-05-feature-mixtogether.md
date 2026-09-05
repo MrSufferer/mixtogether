@@ -25,7 +25,7 @@ status: in-progress
 - [x] Add mocked Playwright connected saver journey across desktop and mobile Chromium with in-process mock chain and Zama SDK harness.
 - [x] Implement repo-root gitignored `.env` loading with resolver unit tests and fail-closed Sepolia configuration for Hardhat, keeper, and Vite.
 - [ ] Complete the externally blocked Sepolia deployment (pool deploy, Etherscan verify, 100 cUSDC prize reserve funding, and live eight-slot HCU + two-wallet smoke tests).
-- [ ] Create public GitHub repository MrSufferer/mixtogether and push feat/mixtogether.
+- [x] Create public GitHub repository `MrSufferer/mixtogether` and push `feat/mixtogether`.
 
 ## Dependencies
 
@@ -36,7 +36,7 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 - Vercel preview: deployed and independently checked for readiness, security headers, and browser console errors.
 - Sepolia token preflight: passed for the official cUSDC/USDC pair, including a successful public faucet simulation.
 - Sepolia pool deployment: waiting for operator to populate a funded `DEPLOYER_PRIVATE_KEY` in the gitignored `.env` file; live-network configuration fails closed with empty accounts when the key is absent.
-- GitHub publication: `gh` CLI is authenticated as `MrSufferer`; ready for public repository creation and push.
+- GitHub publication: published publicly at <https://github.com/MrSufferer/mixtogether> on branch `feat/mixtogether`; CI workflow queued.
 ## Risks and mitigations
 
 - FHE package/API drift: pin versions verified from official template/npm and compile against installed declarations.
@@ -50,4 +50,4 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 
 - Done: repo-root gitignored `.env` loading with resolver unit tests (`scripts/load-env.test.ts`), Hardhat config fail-closed accounts, keeper env loading, and Vite `envDir` sharing.
 - Blocked: Sepolia deployment, 100 cUSDC reserve funding, and live eight-slot HCU + two-wallet smoke tests remain blocked until operator enters funded `DEPLOYER_PRIVATE_KEY` in `.env`.
-- Next: Create public GitHub repository `MrSufferer/mixtogether`, push `feat/mixtogether`, and confirm CI.
+- Done: created public GitHub repository `MrSufferer/mixtogether`, pushed `feat/mixtogether`, verified `isPrivate=false`, and confirmed CI started.
