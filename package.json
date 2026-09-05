@@ -1,0 +1,21 @@
+{
+  "name": "mixtogether",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@8.15.9",
+  "scripts": {
+    "build": "pnpm --filter @mixtogether/contracts build && pnpm --filter @mixtogether/web build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:contracts": "pnpm --filter @mixtogether/contracts test",
+    "test:web": "pnpm --filter @mixtogether/web test",
+    "test:e2e": "pnpm --filter @mixtogether/web test:e2e",
+    "dev": "pnpm --filter @mixtogether/web dev",
+    "keeper": "pnpm --filter @mixtogether/contracts keeper"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

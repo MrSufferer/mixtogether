@@ -1,0 +1,26 @@
+node_modules/
+.pnpm-store/
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/
+dist/
+artifacts/
+cache/
+typechain-types/
+packages/contracts/types/
+packages/contracts/fhevmTemp/
+*.tsbuildinfo
+playwright-report/
+test-results/
+.playwright-cli/
+.vercel/
+deployments/local/
+*.log
+
+# AI DevKit installs machine-local absolute skill symlinks. The portable
+# manifest is tracked in .ai-devkit.json.
+.agents/skills/
+.claude/skills/
+.grok/skills/

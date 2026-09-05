@@ -1,0 +1,40 @@
+---
+phase: planning
+feature: mixtogether
+title: MixTogether implementation plan
+status: in-progress
+---
+
+# MixTogether implementation plan
+
+## Queue
+
+- [x] Record approved requirements and design; validate current Zama sources.
+- [x] Scaffold pnpm workspace, Hardhat V2 package, and Vite React package.
+- [x] Contract red/green: callback accounting, registration, ACL, exits, phase machine, accrual, randomization, selection, pruning, pause, and ownership.
+- [x] Contract invariants and deterministic random harness.
+- [x] Deployment scripts, address validator, keeper, ABI export, and Sepolia smoke tooling.
+- [x] Web red/green: formatting, privacy reveal model, draw action model, pending unwrap persistence, dashboard, and failure states.
+- [x] Component/accessibility tests and preview-mode Playwright flows.
+- [x] Brand, README, CI, environment template, security disclosures, license, and release collateral.
+- [x] Run full local gates, audit the implementation against requirements, and attempt authorized Sepolia/GitHub/Vercel release steps.
+- [ ] Complete the externally blocked Sepolia deployment, onchain smoke tests, and public GitHub publication.
+
+## Dependencies
+
+Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app boundary so UI tests remain deterministic. Sepolia deployment depends on an available funded deployer and RPC. GitHub publication depends on `gh` authentication as `MrSufferer`; preview deployment depends on Vercel authentication or the claimable fallback.
+
+## Release status
+
+- Vercel preview: deployed and independently checked for readiness, security headers, and browser console errors.
+- Sepolia token preflight: passed for the official cUSDC/USDC pair, including a successful public faucet simulation.
+- Sepolia pool deployment: waiting for an explicitly configured deployer with enough Sepolia ETH; live-network configuration now fails closed when the key is absent.
+- GitHub publication: waiting for `gh auth login -h github.com`; the configured `MrSufferer` token is invalid.
+
+## Risks and mitigations
+
+- FHE package/API drift: pin versions verified from official template/npm and compile against installed declarations.
+- HCU overflow: smallest encrypted widths, scalar operations, eight-slot fixed batches, and Sepolia gas/HCU smoke evidence.
+- Callback/refund ambiguity: accept only authenticated callbacks and credit the actual transferred handle supplied by ERC-7984.
+- Privacy regression: never log/emit handles or auto-decrypt; clear revealed state on wallet/chain/session change.
+- Unfinished async unshield: persist and rediscover request identifiers.
