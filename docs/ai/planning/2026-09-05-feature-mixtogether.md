@@ -51,3 +51,12 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 - Done: repo-root gitignored `.env` loading with resolver unit tests (`scripts/load-env.test.ts`), Hardhat config fail-closed accounts, keeper env loading, and Vite `envDir` sharing.
 - Blocked: Sepolia deployment, 100 cUSDC reserve funding, and live eight-slot HCU + two-wallet smoke tests remain blocked until operator enters funded `DEPLOYER_PRIVATE_KEY` in `.env`.
 - Done: created public GitHub repository `MrSufferer/mixtogether`, pushed `feat/mixtogether`, verified `isPrivate=false`, and confirmed CI started.
+
+## Phase 6 reconciliation — 2026-09-05
+
+All planned local implementation, test automation, and repository publication tasks are complete. The `.env` operator configuration is live with verified fail-closed Sepolia account resolution. The public GitHub repository is established at <https://github.com/MrSufferer/mixtogether>, and GitHub Actions CI is green (`verify` passed in 1m46s).
+
+Remaining work is strictly external release deployment:
+1. **Immediate prerequisite:** Operator places a funded Sepolia hex private key into the gitignored `.env` file (`DEPLOYER_PRIVATE_KEY=0x...`).
+2. **Deploy and verify:** Execute `pnpm --filter @mixtogether/contracts deploy:sepolia` and verify source on Etherscan.
+3. **Onchain smoke:** Fund 100 cUSDC to the confidential prize reserve and execute the eight-slot HCU + two-wallet walkthrough.
