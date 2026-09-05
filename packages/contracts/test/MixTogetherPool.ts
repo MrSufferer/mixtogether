@@ -261,7 +261,7 @@ describe("MixTogetherPool", function () {
     await pool.connect(alice).withdrawAll();
 
     expect(await decrypt64(pool, "drawWeightOf", alice, aliceAddress)).to.equal(
-      10n * (scheduledCutoff - depositedAt),
+      10n * (BigInt(scheduledCutoff) - BigInt(depositedAt)),
     );
     expect(await pool.exitRequested(aliceAddress)).to.equal(true);
   });
@@ -454,7 +454,7 @@ describe("MixTogetherPool", function () {
     await pool.connect(keeper).closeDraw();
     await pool.connect(keeper).processAccrualBatch();
     expect(await decrypt64(pool, "drawWeightOf", alice, aliceAddress)).to.equal(
-      10n * (withdrawnAt - depositedAt),
+      10n * (BigInt(withdrawnAt) - BigInt(depositedAt)),
     );
     await pool.setRandomWord(0);
     await pool.connect(keeper).randomizeDraw();
