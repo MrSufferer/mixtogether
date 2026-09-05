@@ -15,8 +15,10 @@ test("renders a safe, accessible contract preview", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Deposit" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Claim private winnings" })).toBeDisabled();
   await expect(page.getByRole("article", { name: "Recent draw history" })).toContainText(
-    "Completed draws will appear here without exposing winner addresses.",
+    "Completed draws will appear here without exposing private outcomes.",
   );
+  await expect(page.getByText("Nominal prize", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Actual award depends on the private reserve/)).toBeVisible();
   await expect(page.getByText("Private amounts, public participation.")).toBeVisible();
   expect(pageErrors).toEqual([]);
 });

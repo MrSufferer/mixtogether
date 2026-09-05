@@ -19,12 +19,13 @@ Validate chain id `11155111`, bytecode at wrapper/underlying/registry, wrapper d
 
 ## Contract release
 
-1. Run local gates and Sepolia dry reads.
-2. Deploy `MixTogetherPool(cUSDC, guardian)` with Hardhat deploy.
-3. Verify source and constructor arguments.
-4. Fund 100 cUSDC through `confidentialTransferAndCall(..., abi.encode(PRIZE))`.
-5. Complete eight-slot HCU smoke and two-wallet scenario.
-6. Commit a generated deployment manifest and ABI.
+1. Copy `.env.example` to `.env` at repo root and set `DEPLOYER_PRIVATE_KEY` (funded hex key), plus optional `ETHERSCAN_API_KEY` and `SEPOLIA_RPC_URL`.
+2. Run local gates and Sepolia dry reads.
+3. Deploy `MixTogetherPool(cUSDC, guardian)` with Hardhat deploy (`pnpm deploy:sepolia`).
+4. Verify source and constructor arguments.
+5. Fund 100 cUSDC through `confidentialTransferAndCall(..., abi.encode(PRIZE))`.
+6. Complete eight-slot HCU smoke and two-wallet scenario.
+7. Commit a generated deployment manifest and ABI.
 
 ## Web release
 
@@ -37,7 +38,7 @@ The pool is immutable and non-upgradeable. A broken deployment is superseded by 
 ## Release record — 2026-09-05
 
 - Official pair preflight passed on chain `11155111`: code, six-decimal assets, 1:1 wrapper rate, underlying relationship, registry mappings, registry validity, and public faucet simulation.
-- Pool deployment was not attempted because no deployment key is configured. Live-network configuration intentionally has no test-mnemonic fallback.
+- Pool deployment was not attempted because `DEPLOYER_PRIVATE_KEY` is not yet populated in the gitignored `.env`. Live-network configuration intentionally fails closed with empty accounts.
 - Vercel preview `dpl_2qLycQXuUQqe1QxZKXe7QSAaYfox` reached `READY` at <https://web-5wg8kthck-gadillacers-projects.vercel.app>.
 - The preview returned HTTP 200 with COOP `same-origin`, COEP `require-corp`, HSTS, `nosniff`, and strict-origin referrer policy headers, and loaded without application console errors.
-- GitHub source publication is pending because `gh auth status` reports the configured `MrSufferer` credential as invalid.
+- GitHub source publication is unblocked; `gh auth status` confirms valid authentication as `MrSufferer`.

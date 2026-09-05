@@ -36,13 +36,13 @@ Last updated: 2026-09-05.
 - [ ] Deploy `MixTogetherPool` from a funded non-test Sepolia signer.
 - [ ] Fund the pool’s confidential prize reserve.
 - [ ] Configure `VITE_POOL_ADDRESS` and publish a transaction-enabled web deployment.
-- [ ] Re-authenticate GitHub CLI, create `MrSufferer/mixtogether`, push, and confirm public visibility.
+- [ ] Create public GitHub repository `MrSufferer/mixtogether`, push, and confirm public visibility.
 - [ ] Record and upload the demo video.
 - [ ] Replace preview/noindex URL with the final production URL in release collateral.
 
 ## Current blockers
 
-- The configured Hardhat variable store has no deployer key, so deployment was not attempted. Live-network configuration intentionally fails closed instead of using Hardhat's public test mnemonic.
-- GitHub CLI reports the active `MrSufferer` token as invalid, and this repository has no remote.
+- `DEPLOYER_PRIVATE_KEY` is not yet populated in the gitignored `.env` file, so Sepolia deployment was not attempted. Live-network configuration intentionally fails closed with empty accounts rather than using Hardhat's public test mnemonic.
+- GitHub CLI is authenticated as `MrSufferer`; public repository creation and push is ready.
 
 The Vercel preview is deliberately transaction-disabled until the contract deployment and post-deployment smoke checks are complete.

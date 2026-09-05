@@ -1,4 +1,5 @@
 export const DRAW_PHASES = ["Open", "Accruing", "Randomizing", "Selecting"] as const;
+export const HISTORY_LABEL = "Confidential outcome";
 
 export type DrawAction =
   | "closeDraw"
@@ -24,7 +25,7 @@ export const drawActionLabel: Record<DrawAction, string> = {
   closeDraw: "Close saving epoch",
   processAccrualBatch: "Process chance batch",
   randomizeDraw: "Create private ticket",
-  processSelectionBatch: "Scan winner batch",
+  processSelectionBatch: "Process selection batch",
 };
 
 export function secondsUntil(timestamp: number, now = Date.now() / 1000): number {

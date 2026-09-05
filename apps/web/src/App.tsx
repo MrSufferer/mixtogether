@@ -54,6 +54,7 @@ import {
 import { poolAbi, tokenAbi, wrapperEventsAbi } from "./lib/contracts";
 import {
   DRAW_PHASES,
+  HISTORY_LABEL,
   drawActionLabel,
   formatDuration,
   nextDrawAction,
@@ -419,20 +420,20 @@ export default function App() {
 
           <article className="panel pool-panel">
             <div className="pool-visual" style={{ "--pool-fill": `${Math.max(8, saverCount / 64 * 100)}%` } as React.CSSProperties}><span className="wave" /><Gift /></div>
-            <div className="pool-copy"><p className="kicker">Shared pool</p><h2>{saverCount} / 64 savers</h2><p>Exact pool size, weights, odds, ticket, reserve, and winner stay encrypted.</p></div>
+            <div className="pool-copy"><p className="kicker">Shared pool</p><h2>{saverCount} / 64 savers</h2><p>Exact pool size, weights, odds, ticket, reserve, and selected interval stay encrypted.</p></div>
           </article>
 
           <article className="privacy-card">
             <Trophy />
-            <div><strong>One winner. 10 cUSDC.</strong><p>The award comes only from the private prize reserve—never saver principal.</p></div>
+            <div><strong>Nominal prize: up to 10 cUSDC.</strong><p>Actual award depends on the private reserve and may be lower, including zero. Saver principal never funds prizes.</p></div>
           </article>
 
           <article className="panel history-panel" aria-label="Recent draw history">
             <div className="panel-heading"><div><p className="kicker">Recent draws</p><h2>Private results</h2></div><EyeOff className="panel-icon" /></div>
             {completedDraws.length > 0 ? (
-              <ol>{completedDraws.map((id) => <li key={id}><span>Draw #{id}</span><strong>Confidential winner</strong></li>)}</ol>
+              <ol>{completedDraws.map((id) => <li key={id}><span>Draw #{id}</span><strong>{HISTORY_LABEL}</strong></li>)}</ol>
             ) : (
-              <p className="history-empty">Completed draws will appear here without exposing winner addresses.</p>
+              <p className="history-empty">Completed draws will appear here without exposing private outcomes.</p>
             )}
           </article>
         </motion.aside>
@@ -470,7 +471,7 @@ function JourneyStep({ number, title, detail, action, onClick, disabled, icon, p
 }
 
 function PrizeOrb({ drawId, phase, reduced }: { drawId: number; phase: number; reduced: boolean }) {
-  return <motion.div className="orb-stage" initial={reduced ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.14, duration: 0.7 }}><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Sparkles /><span>Private prize</span><strong>10</strong><small>cUSDC</small></div><p><i /> Draw #{drawId} · {DRAW_PHASES[phase] ?? "Loading"}</p></motion.div>;
+  return <motion.div className="orb-stage" initial={reduced ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.14, duration: 0.7 }}><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Sparkles /><span>Nominal prize</span><strong>10</strong><small>cUSDC</small></div><p><i /> Draw #{drawId} · {DRAW_PHASES[phase] ?? "Loading"}</p></motion.div>;
 }
 
 function TicketMotes({ reduced }: { reduced: boolean }) {

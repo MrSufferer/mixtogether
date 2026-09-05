@@ -1,5 +1,7 @@
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import { loadRepoEnv } from "./load-env";
 
+loadRepoEnv();
 const keeperAbi = [
   "function drawState() view returns (uint64 drawId,uint8 phase,uint48 epochStartedAt,uint48 cutoff,uint48 scheduledCutoff,uint8 accrualCursor,uint8 selectionCursor,uint8 registeredSavers)",
   "function closeDraw()",

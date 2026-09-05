@@ -112,17 +112,21 @@ pnpm test:e2e
 
 ## Sepolia validation and deployment
 
-Hardhat secrets use its encrypted variable store rather than committed files:
+Operator configuration is managed via the gitignored repo-root `.env` file (copied from `.env.example`):
 
 ```bash
-cd packages/contracts
-pnpm exec hardhat vars set DEPLOYER_PRIVATE_KEY
-pnpm exec hardhat vars set SEPOLIA_RPC_URL
-pnpm exec hardhat vars set ETHERSCAN_API_KEY
+cp .env.example .env
+# Fill DEPLOYER_PRIVATE_KEY with your funded Sepolia hex private key.
+# Optionally configure ETHERSCAN_API_KEY for contract verification and SEPOLIA_RPC_URL.
+# Never prefix private keys with VITE_ or commit .env.
+```
+
+Hardhat `vars` is also supported as an optional non-secret fallback for RPC or API keys:
+
+```bash
 pnpm validate:sepolia
 pnpm deploy:sepolia
 ```
-
 `GUARDIAN_ADDRESS` may be supplied as a server-side environment variable; otherwise the deployer becomes guardian. The deploy script re-runs token validation, writes `deployments/sepolia/MixTogetherPool.json`, and verifies on Etherscan when an API key is available.
 
 After deployment, set `VITE_POOL_ADDRESS`, rebuild the web app, fund the reserve through cUSDC `confidentialTransferAndCall` with `abi.encode(uint8(2))`, and complete the two-wallet/eight-saver smoke checklist before treating the demo as transaction-ready.

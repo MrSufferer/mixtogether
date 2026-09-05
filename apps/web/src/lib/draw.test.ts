@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextDrawAction } from "./draw";
+import { HISTORY_LABEL, drawActionLabel, nextDrawAction } from "./draw";
 
 describe("permissionless draw progression", () => {
   it("does not offer close before the cutoff", () => {
@@ -11,5 +11,10 @@ describe("permissionless draw progression", () => {
     expect(nextDrawAction({ phase: 1, now: 100, scheduledCutoff: 100 })).toBe("processAccrualBatch");
     expect(nextDrawAction({ phase: 2, now: 100, scheduledCutoff: 100 })).toBe("randomizeDraw");
     expect(nextDrawAction({ phase: 3, now: 100, scheduledCutoff: 100 })).toBe("processSelectionBatch");
+  });
+
+  it("uses privacy-safe draw outcome language", () => {
+    expect(HISTORY_LABEL).toBe("Confidential outcome");
+    expect(drawActionLabel.processSelectionBatch).toBe("Process selection batch");
   });
 });

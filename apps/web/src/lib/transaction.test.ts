@@ -7,7 +7,11 @@ describe("transaction feedback", () => {
   it("extracts hashes from direct and receipt-backed results", () => {
     expect(transactionHashOf(hash)).toBe(hash);
     expect(transactionHashOf({ hash })).toBe(hash);
+    expect(transactionHashOf({ txHash: hash, hash: `0x${"cd".repeat(32)}` })).toBe(hash);
+    expect(transactionHashOf({ txHash: hash, receipt: { transactionHash: `0x${"cd".repeat(32)}` } })).toBe(hash);
     expect(transactionHashOf({ receipt: { transactionHash: hash } })).toBe(hash);
+    expect(transactionHashOf({ transaction: { hash } })).toBe(hash);
+    expect(transactionHashOf({ txHash: "0x1234", receipt: { transactionHash: hash } })).toBe(hash);
     expect(transactionHashOf({ hash: "0x1234" })).toBeUndefined();
   });
 

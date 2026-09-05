@@ -6,22 +6,19 @@ import "@typechain/hardhat";
 
 import type { HardhatUserConfig } from "hardhat/config";
 import { vars } from "hardhat/config";
+import { loadRepoEnv, resolveSepoliaConfig } from "./scripts/load-env";
+
+loadRepoEnv();
 
 const mnemonic = vars.get(
   "MNEMONIC",
   "test test test test test test test test test test test junk",
 );
-const infuraApiKey = vars.get("INFURA_API_KEY", "");
-const deployerPrivateKey = vars.get("DEPLOYER_PRIVATE_KEY", "");
-// Never fall back to Hardhat's publicly known development mnemonic on a live
-// network. Read-only Sepolia scripts work with no configured accounts, while
-// deployment fails closed until an explicit key is supplied.
-const sepoliaAccounts = deployerPrivateKey ? [deployerPrivateKey] : [];
-
+const sepolia = resolveSepoliaConfig(process.env, vars.get.bind(vars));
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
   etherscan: {
-    apiKey: { sepolia: vars.get("ETHERSCAN_API_KEY", "") },
+    apiKey: { sepolia: sepolia.etherscanApiKey },
   },
   networks: {
     hardhat: {
@@ -29,14 +26,9 @@ const config: HardhatUserConfig = {
       chainId: 31337,
     },
     sepolia: {
-      accounts: sepoliaAccounts,
+      accounts: sepolia.accounts,
       chainId: 11155111,
-      url: vars.get(
-        "SEPOLIA_RPC_URL",
-        infuraApiKey
-          ? `https://sepolia.infura.io/v3/${infuraApiKey}`
-          : "https://ethereum-sepolia-rpc.publicnode.com",
-      ),
+      url: sepolia.url,
     },
   },
   paths: {

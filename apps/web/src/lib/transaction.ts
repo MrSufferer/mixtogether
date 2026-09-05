@@ -8,7 +8,7 @@ export function transactionHashOf(value: unknown): Hex | undefined {
   if (!value || typeof value !== "object") return undefined;
 
   const record = value as Record<string, unknown>;
-  for (const key of ["hash", "transactionHash"]) {
+  for (const key of ["txHash", "hash", "transactionHash"]) {
     const candidate = record[key];
     if (typeof candidate === "string" && HASH.test(candidate)) {
       return candidate as Hex;

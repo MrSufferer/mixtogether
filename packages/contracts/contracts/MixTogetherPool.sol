@@ -49,6 +49,9 @@ contract MixTogetherPool is
     /// @notice One-based slot number. Zero means the address is not registered.
     mapping(address saver => uint8 slotPlusOne) public slotOf;
     mapping(address saver => bool requested) public exitRequested;
+    /// @notice Draw id whose eligibility must be completed before pruning.
+    ///         Zero means the saver has no pending exit.
+    mapping(address saver => uint64 drawId) public exitDrawId;
     mapping(address saver => uint48 timestamp) public lastAccrual;
 
     mapping(address saver => euint64 amount) private _principal;
@@ -154,6 +157,7 @@ contract MixTogetherPool is
         _aggregatePrincipal = FHE.sub(_aggregatePrincipal, transferred);
         FHE.allowThis(_aggregatePrincipal);
         exitRequested[msg.sender] = true;
+        exitDrawId[msg.sender] = _drawId;
 
         emit Withdrawal(msg.sender);
     }
@@ -260,11 +264,16 @@ contract MixTogetherPool is
             uint8 slot = slots[i];
             if (slot >= MAX_SAVERS) revert InvalidSlot(slot);
             address saver = _savers[slot];
-            if (saver == address(0) || !exitRequested[saver]) continue;
+            if (
+                saver == address(0) ||
+                !exitRequested[saver] ||
+                _drawId <= exitDrawId[saver]
+            ) continue;
 
             _savers[slot] = address(0);
             slotOf[saver] = 0;
             exitRequested[saver] = false;
+            exitDrawId[saver] = 0;
             lastAccrual[saver] = 0;
             unchecked {
                 --saverCount;
@@ -361,6 +370,7 @@ contract MixTogetherPool is
         _aggregatePrincipal = FHE.add(_aggregatePrincipal, amount);
         FHE.allowThis(_aggregatePrincipal);
         exitRequested[saver] = false;
+        exitDrawId[saver] = 0;
     }
 
     function _register(address saver) private {
@@ -494,8 +504,9 @@ contract MixTogetherPool is
     }
 
     function _zeroFor(address user) private returns (euint64 value) {
-        value = _zero64();
-        FHE.allow(value, user);
+        euint64 r = FHE.randEuint64();
+        value = FHE.sub(r, r);
+        _persistUser64(value, user);
     }
 
     function _value64(euint64 value) private returns (euint64) {

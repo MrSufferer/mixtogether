@@ -1,7 +1,7 @@
 import { FhevmType } from "@fhevm/hardhat-plugin";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
-import { AbiCoder } from "ethers";
+import { AbiCoder, type HDNodeWallet, type Signer } from "ethers";
 import { ethers, fhevm } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import type { MixTogetherPoolHarness, TestConfidentialToken } from "../types";
@@ -23,10 +23,36 @@ type Fixture = {
   keeper: HardhatEthersSigner;
 };
 
+async function fundedWallet(): Promise<HDNodeWallet> {
+  const wallet = ethers.Wallet.createRandom().connect(ethers.provider);
+  await ethers.provider.send("hardhat_setBalance", [
+    wallet.address,
+    "0x56BC75E2D63100000", // 100 ETH
+  ]);
+  return wallet;
+}
+
+async function expectUserDecryptUnauthorized(
+  promise: Promise<unknown>,
+  userAddress: string,
+  handle: string,
+) {
+  let thrown: Error | null = null;
+  try {
+    await promise;
+  } catch (err: unknown) {
+    thrown = err as Error;
+  }
+  expect(thrown).to.not.be.null;
+  expect(thrown!.message).to.include(
+    `User ${userAddress} is not authorized to user decrypt handle ${handle}!`,
+  );
+}
+
 async function decrypt64(
   contract: MixTogetherPoolHarness,
   getter: string,
-  signer: HardhatEthersSigner,
+  signer: HardhatEthersSigner | HDNodeWallet | Signer,
   ...args: unknown[]
 ): Promise<bigint> {
   const method = (
@@ -44,7 +70,7 @@ async function decrypt64(
 async function encryptedTransferAndCall(
   token: TestConfidentialToken,
   tokenAddress: string,
-  sender: HardhatEthersSigner,
+  sender: HardhatEthersSigner | HDNodeWallet | Signer,
   receiver: string,
   amount: bigint,
   mode: number,
@@ -392,6 +418,127 @@ describe("MixTogetherPool", function () {
     expect(await pool.slotOf(aliceAddress)).to.equal(0n);
   });
 
+  it("holds an OPEN withdrawal through its draw and preserves its earned eligibility", async function () {
+    const { token, pool, tokenAddress, poolAddress, guardian, alice, keeper } =
+      await deployFixture();
+    const aliceAddress = await alice.getAddress();
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    const depositedAt = await pool.lastAccrual(aliceAddress);
+    await time.increase(60);
+    await pool.connect(alice).withdrawAll();
+    const withdrawnAt = await pool.lastAccrual(aliceAddress);
+
+    expect(await pool.exitRequested(aliceAddress)).to.equal(true);
+    expect(await pool.exitDrawId(aliceAddress)).to.equal(1n);
+    await pool.pruneExited([0]);
+    expect(await pool.saverAt(0)).to.equal(aliceAddress);
+    expect(await pool.slotOf(aliceAddress)).to.equal(1n);
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      guardian,
+      poolAddress,
+      PRIZE_AMOUNT,
+      PRIZE,
+    );
+    await time.increase(240);
+    await pool.connect(keeper).closeDraw();
+    await pool.connect(keeper).processAccrualBatch();
+    expect(await decrypt64(pool, "drawWeightOf", alice, aliceAddress)).to.equal(
+      10n * (withdrawnAt - depositedAt),
+    );
+    await pool.setRandomWord(0);
+    await pool.connect(keeper).randomizeDraw();
+    await pool.connect(keeper).processSelectionBatch();
+    expect(await decrypt64(pool, "winningsOf", alice, aliceAddress)).to.equal(
+      PRIZE_AMOUNT,
+    );
+    await pool.pruneExited([0]);
+    expect(await pool.saverAt(0)).to.equal(ethers.ZeroAddress);
+    expect(await pool.exitDrawId(aliceAddress)).to.equal(0n);
+  });
+
+  it("cancels both exit markers when a saver redeposits before pruning", async function () {
+    const { token, pool, tokenAddress, poolAddress, alice } = await deployFixture();
+    const aliceAddress = await alice.getAddress();
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    await pool.connect(alice).withdrawAll();
+    expect(await pool.exitRequested(aliceAddress)).to.equal(true);
+    expect(await pool.exitDrawId(aliceAddress)).to.equal(1n);
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    expect(await pool.exitRequested(aliceAddress)).to.equal(false);
+    expect(await pool.exitDrawId(aliceAddress)).to.equal(0n);
+    await pool.pruneExited([0]);
+    expect(await pool.saverAt(0)).to.equal(aliceAddress);
+  });
+
+  it("skips a pending exit while pruning a matured exit in the same batch", async function () {
+    const { token, pool, tokenAddress, poolAddress, alice, bob, keeper } =
+      await deployFixture();
+    const aliceAddress = await alice.getAddress();
+    const bobAddress = await bob.getAddress();
+
+    for (const saver of [alice, bob]) {
+      await encryptedTransferAndCall(
+        token,
+        tokenAddress,
+        saver,
+        poolAddress,
+        ONE_USDC,
+        DEPOSIT,
+      );
+      await pool.connect(saver).withdrawAll();
+    }
+
+    await time.increase(300);
+    await pool.connect(keeper).closeDraw();
+    await pool.connect(keeper).processAccrualBatch();
+    await pool.connect(keeper).randomizeDraw();
+    await pool.connect(keeper).processSelectionBatch();
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    await pool.connect(alice).withdrawAll();
+    expect(await pool.exitDrawId(aliceAddress)).to.equal(2n);
+    expect(await pool.exitDrawId(bobAddress)).to.equal(1n);
+
+    await pool.pruneExited([0, 1]);
+    expect(await pool.saverAt(0)).to.equal(aliceAddress);
+    expect(await pool.saverAt(1)).to.equal(ethers.ZeroAddress);
+    expect(await pool.exitDrawId(bobAddress)).to.equal(0n);
+  });
+
   it("uses two-step guardian transfer", async function () {
     const { token, tokenAddress, pool, poolAddress, guardian, bob } = await deployFixture();
     const bobAddress = await bob.getAddress();
@@ -421,5 +568,122 @@ describe("MixTogetherPool", function () {
     }
     expect(formerGuardianCanDecrypt).to.equal(false);
     await expect(pool.connect(guardian).pauseDeposits()).to.be.reverted;
+  });
+
+  it("rejects the 65th saver with RegistryFull", async function () {
+    this.timeout(180_000);
+    const { token, pool, tokenAddress, poolAddress } = await deployFixture();
+    const signers = await ethers.getSigners();
+    const hardhatSavers = signers.slice(1); // 19 signers
+    const randomSavers: (HardhatEthersSigner | HDNodeWallet)[] = [];
+    for (let i = 0; i < 45; i++) {
+      randomSavers.push(await fundedWallet());
+    }
+    const all64Savers = [...hardhatSavers, ...randomSavers];
+    expect(all64Savers.length).to.equal(64);
+
+    for (const saver of all64Savers) {
+      const addr = await saver.getAddress();
+      await token.faucetMint(addr, 2n * ONE_USDC);
+      await encryptedTransferAndCall(
+        token,
+        tokenAddress,
+        saver,
+        poolAddress,
+        ONE_USDC,
+        DEPOSIT,
+      );
+    }
+
+    expect(await pool.saverCount()).to.equal(64n);
+    for (let i = 0; i < 64; i++) {
+      expect(await pool.saverAt(i)).to.equal(await all64Savers[i].getAddress());
+    }
+
+    const saver65 = await fundedWallet();
+    const saver65Addr = await saver65.getAddress();
+    await token.faucetMint(saver65Addr, 2n * ONE_USDC);
+    await expect(
+      encryptedTransferAndCall(
+        token,
+        tokenAddress,
+        saver65,
+        poolAddress,
+        ONE_USDC,
+        DEPOSIT,
+      ),
+    ).to.be.revertedWithCustomError(pool, "RegistryFull");
+
+    expect(await pool.saverCount()).to.equal(64n);
+  });
+
+  it("denies another saver user-decrypt of foreign principal and winnings", async function () {
+    const { token, pool, tokenAddress, poolAddress, guardian, alice, bob } =
+      await deployFixture();
+    const aliceAddress = await alice.getAddress();
+    const bobAddress = await bob.getAddress();
+    const guardianAddress = await guardian.getAddress();
+    const poolAddr = await pool.getAddress();
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      bob,
+      poolAddress,
+      2n * ONE_USDC,
+      DEPOSIT,
+    );
+
+    expect(await decrypt64(pool, "principalOf", alice, aliceAddress)).to.equal(
+      ONE_USDC,
+    );
+    expect(await decrypt64(pool, "winningsOf", alice, aliceAddress)).to.equal(0n);
+
+    const alicePrincipalHandle = await pool.principalOf(aliceAddress);
+    const aliceWinningsHandle = await pool.winningsOf(aliceAddress);
+    await expectUserDecryptUnauthorized(
+      fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        alicePrincipalHandle,
+        poolAddr,
+        bob,
+      ),
+      bobAddress,
+      alicePrincipalHandle,
+    );
+
+    await expectUserDecryptUnauthorized(
+      fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        aliceWinningsHandle,
+        poolAddr,
+        bob,
+      ),
+      bobAddress,
+      aliceWinningsHandle,
+    );
+
+    expect(await decrypt64(pool, "principalOf", bob, bobAddress)).to.equal(
+      2n * ONE_USDC,
+    );
+
+    await expectUserDecryptUnauthorized(
+      fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        alicePrincipalHandle,
+        poolAddr,
+        guardian,
+      ),
+      guardianAddress,
+      alicePrincipalHandle,
+    );
   });
 });

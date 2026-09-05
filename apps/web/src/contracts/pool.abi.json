@@ -611,6 +611,25 @@
         "type": "address"
       }
     ],
+    "name": "exitDrawId",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "drawId",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "saver",
+        "type": "address"
+      }
+    ],
     "name": "exitRequested",
     "outputs": [
       {
