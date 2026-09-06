@@ -63,7 +63,7 @@ import {
 } from "./lib/draw";
 import { mergePendingUnwraps, pendingUnwrapStore } from "./lib/unwrap";
 import { clearPrivateQueryCache } from "./lib/private-session";
-import { friendlyWalletError, transactionHashOf } from "./lib/transaction";
+import { assertSuccessfulReceipt, friendlyWalletError, transactionHashOf } from "./lib/transaction";
 
 type DrawState = readonly [bigint, number, number, number, number, number, number, number];
 type Handles = { token?: Hex; principal?: Hex; winnings?: Hex };
@@ -208,7 +208,11 @@ export default function App() {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The wallet operation failed.";
       setError(friendlyWalletError(message));
-      setReceiptState({ label, status: "error" });
+      setReceiptState({
+        label,
+        status: "error",
+        hash: transactionHashOf(cause),
+      });
       setRetryOperation({ label, operation });
       setNotice("Nothing changed.");
     } finally {
@@ -231,6 +235,7 @@ export default function App() {
         chainId: CHAIN_ID,
       });
       const receipt = await publicClient?.waitForTransactionReceipt({ hash });
+      assertSuccessfulReceipt(receipt);
       return receipt ?? hash;
     });
   }
@@ -268,6 +273,7 @@ export default function App() {
         chainId: CHAIN_ID,
       });
       const receipt = await publicClient?.waitForTransactionReceipt({ hash });
+      assertSuccessfulReceipt(receipt);
       setRevealed(false);
       return receipt ?? hash;
     });
@@ -445,7 +451,7 @@ export default function App() {
           <strong>{error ?? notice}</strong>
           {receiptState?.hash && (
             <a href={`https://sepolia.etherscan.io/tx/${receiptState.hash}`} target="_blank" rel="noreferrer">
-              View confirmed receipt <ArrowRight size={13} />
+              {receiptState.status === "error" ? "View failed receipt" : "View confirmed receipt"} <ArrowRight size={13} />
             </a>
           )}
         </div>

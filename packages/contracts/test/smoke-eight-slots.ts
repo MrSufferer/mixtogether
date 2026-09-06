@@ -2,6 +2,7 @@ import { expect } from "chai";
 import {
   validateEightSlotConfig,
   formatSlotReceipt,
+  isRegistryCursorComplete,
   SLOT_DEPOSIT_AMOUNT,
 } from "../scripts/smoke-eight-slots";
 
@@ -41,5 +42,12 @@ describe("smoke-eight-slots helpers", function () {
     expect(formatted.hash).to.equal(
       "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
     );
+  });
+
+  it("completes accrual/selection only after the 64-slot cursor is exhausted", function () {
+    expect(isRegistryCursorComplete(8)).to.equal(false);
+    expect(isRegistryCursorComplete(63)).to.equal(false);
+    expect(isRegistryCursorComplete(64)).to.equal(true);
+    expect(isRegistryCursorComplete(64n)).to.equal(true);
   });
 });

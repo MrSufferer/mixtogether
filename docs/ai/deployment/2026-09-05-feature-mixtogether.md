@@ -43,3 +43,7 @@ The pool is immutable and non-upgradeable. A broken deployment is superseded by 
 - Vercel preview updated and reached `READY` at <https://web-e9stkxv3e-gadillacers-projects.vercel.app> (deployment `dpl_FNwLWit2SbDq8bnrFuiDZX656fyG`) with `VITE_POOL_ADDRESS=0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` verified inside the bundle.
 - The preview returned HTTP 200 with COOP `same-origin`, COEP `require-corp`, HSTS, `nosniff`, and loaded with 0 browser console errors.
 - GitHub source publication is complete; public repository is live at <https://github.com/MrSufferer/mixtogether> with active CI on `feat/mixtogether`.
+
+## Phase 7 note — 2026-09-06
+
+Canonical preview remains `https://web-e9stkxv3e-gadillacers-projects.vercel.app`. Fresh header check: HTTP/2 200, COOP `same-origin`, COEP `require-corp`, HSTS, `nosniff`, `x-robots-tag: noindex`. Sepolia source for `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` still shows “Verify and Publish”; this record stays `partial` until constructor verification lands. Demo video and production URL/`noindex` swap remain operator follow-ups.

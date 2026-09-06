@@ -36,7 +36,7 @@ Selection rewrites every visited saver’s winnings handle, not only the winner�
 
 **7/7** MixTogether is experimental, unaudited Sepolia software using mock assets.
 
-Demo: https://web-5wg8kthck-gadillacers-projects.vercel.app
+Demo: https://web-e9stkxv3e-gadillacers-projects.vercel.app
 
 Save together. Win in secret. 🔐
 

@@ -15,6 +15,13 @@ import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/node";
 loadRepoEnv();
 
 export const SLOT_DEPOSIT_AMOUNT = 1_000_000n; // 1 cUSDC
+export const REGISTRY_SIZE = 64;
+const MAX_BATCH_CALLS = 9;
+
+/** Accrual/selection leave their phase only when this cursor is exhausted. */
+export function isRegistryCursorComplete(cursor: bigint | number): boolean {
+  return Number(cursor) >= REGISTRY_SIZE;
+}
 
 export function validateEightSlotConfig(
   env: Record<string, string | undefined> = process.env,
@@ -80,8 +87,51 @@ function ethersMaxUint256(): bigint {
   return (1n << 256n) - 1n;
 }
 
+type PoolDrawState = {
+  drawId: bigint;
+  phase: bigint;
+  accrualCursor: bigint;
+  selectionCursor: bigint;
+  scheduledCutoff: bigint;
+};
+
+async function processBatchesWhileInPhase(
+  pool: Contract,
+  expectedPhase: bigint,
+  method: "processAccrualBatch" | "processSelectionBatch",
+  gasLimit: bigint,
+) {
+  let state = (await pool.drawState()) as PoolDrawState;
+  let firstReceipt:
+    | { blockNumber: number; gasUsed: bigint; hash: string }
+    | undefined;
+  let calls = 0;
+  while (
+    state.phase === expectedPhase &&
+    !isRegistryCursorComplete(expectedPhase === 1n ? state.accrualCursor : state.selectionCursor)
+  ) {
+    if (++calls > MAX_BATCH_CALLS) {
+      throw new Error(`${method} did not exhaust the ${REGISTRY_SIZE}-slot cursor`);
+    }
+    const cursor = expectedPhase === 1n ? state.accrualCursor : state.selectionCursor;
+    console.log(`Calling ${method}() #${calls} (cursor ${cursor}/${REGISTRY_SIZE})...`);
+    const tx = await pool[method]({ gasLimit });
+    const receipt = await tx.wait();
+    firstReceipt ??= {
+      blockNumber: Number(receipt.blockNumber),
+      gasUsed: receipt.gasUsed,
+      hash: receipt.hash,
+    };
+    console.log(
+      `  ${method} confirmed in block ${receipt.blockNumber}, gasUsed: ${receipt.gasUsed}`,
+    );
+    state = (await pool.drawState()) as PoolDrawState;
+  }
+  return { firstReceipt, calls, state };
+}
+
 export async function advanceDrawToOpen(pool: Contract, provider: JsonRpcProvider) {
-  let state = await pool.drawState();
+  let state = (await pool.drawState()) as PoolDrawState;
   const latest = await provider.getBlock("latest");
   const now = latest?.timestamp ?? Math.floor(Date.now() / 1000);
 
@@ -97,28 +147,18 @@ export async function advanceDrawToOpen(pool: Contract, provider: JsonRpcProvide
     await tx.wait();
   }
 
-  state = await pool.drawState();
-  if (state.phase === 1n) {
-    console.log("  Processing accrual batch...");
-    const tx = await pool.processAccrualBatch({ gasLimit: 2_000_000n });
-    await tx.wait();
-  }
+  await processBatchesWhileInPhase(pool, 1n, "processAccrualBatch", 2_000_000n);
 
-  state = await pool.drawState();
+  state = (await pool.drawState()) as PoolDrawState;
   if (state.phase === 2n) {
     console.log("  Randomizing draw...");
     const tx = await pool.randomizeDraw({ gasLimit: 1_000_000n });
     await tx.wait();
   }
 
-  state = await pool.drawState();
-  if (state.phase === 3n) {
-    console.log("  Processing selection batch to finalize...");
-    const tx = await pool.processSelectionBatch({ gasLimit: 2_500_000n });
-    await tx.wait();
-  }
+  await processBatchesWhileInPhase(pool, 3n, "processSelectionBatch", 2_500_000n);
 
-  state = await pool.drawState();
+  state = (await pool.drawState()) as PoolDrawState;
   console.log(`Fresh draw active: Draw ${state.drawId}, Phase: ${state.phase}, Cutoff: ${state.scheduledCutoff}`);
 }
 
@@ -259,15 +299,22 @@ export async function runEightSlotSmoke() {
   const closeReceipt = await closeTx.wait();
   console.log(`closeDraw confirmed in block ${closeReceipt.blockNumber}, gasUsed: ${closeReceipt.gasUsed}`);
 
-  // Phase 1 -> 2: processAccrualBatch (processes all 8 occupied slots)
-  console.log("Calling processAccrualBatch() for 8 occupied slots (Live HCU Accrual)...");
-  const accrueTx = await pool.processAccrualBatch({ gasLimit: 2_500_000n });
-  const accrueReceipt = await accrueTx.wait();
+  // Phase 1 -> 2: occupied batch then empty-slot drain until cursor == 64
+  console.log("Processing accrual until the 64-slot cursor completes (Live HCU Accrual)...");
+  const accrual = await processBatchesWhileInPhase(
+    pool,
+    1n,
+    "processAccrualBatch",
+    2_500_000n,
+  );
+  if (!accrual.firstReceipt) {
+    throw new Error("processAccrualBatch was not called after closeDraw");
+  }
   const accrualRecord = formatSlotReceipt("processAccrualBatch (8 slots)", {
     drawId: state.drawId,
-    blockNumber: accrueReceipt.blockNumber,
-    gasUsed: accrueReceipt.gasUsed,
-    hash: accrueReceipt.hash,
+    blockNumber: accrual.firstReceipt.blockNumber,
+    gasUsed: accrual.firstReceipt.gasUsed,
+    hash: accrual.firstReceipt.hash,
   });
   console.log("Live 8-Slot Accrual Receipt:", JSON.stringify(accrualRecord, null, 2));
 
@@ -277,15 +324,22 @@ export async function runEightSlotSmoke() {
   const randReceipt = await randTx.wait();
   console.log(`randomizeDraw confirmed in block ${randReceipt.blockNumber}, gasUsed: ${randReceipt.gasUsed}`);
 
-  // Phase 3 -> 0: processSelectionBatch (processes all 8 occupied slots + selection)
-  console.log("Calling processSelectionBatch() for 8 occupied slots (Live HCU Selection)...");
-  const selectTx = await pool.processSelectionBatch({ gasLimit: 3_000_000n });
-  const selectReceipt = await selectTx.wait();
+  // Phase 3 -> 0: occupied batch then empty-slot drain until cursor == 64
+  console.log("Processing selection until the 64-slot cursor completes (Live HCU Selection)...");
+  const selection = await processBatchesWhileInPhase(
+    pool,
+    3n,
+    "processSelectionBatch",
+    3_000_000n,
+  );
+  if (!selection.firstReceipt) {
+    throw new Error("processSelectionBatch was not called after randomizeDraw");
+  }
   const selectionRecord = formatSlotReceipt("processSelectionBatch (8 slots)", {
     drawId: state.drawId,
-    blockNumber: selectReceipt.blockNumber,
-    gasUsed: selectReceipt.gasUsed,
-    hash: selectReceipt.hash,
+    blockNumber: selection.firstReceipt.blockNumber,
+    gasUsed: selection.firstReceipt.gasUsed,
+    hash: selection.firstReceipt.hash,
   });
   console.log("Live 8-Slot Selection Receipt:", JSON.stringify(selectionRecord, null, 2));
 

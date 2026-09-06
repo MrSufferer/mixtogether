@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+test("announces an invalid amount on the live error region", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await expect(page.getByText(/0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}/)).toBeVisible();
+
+  await page.locator("#amount").fill("1.0000001");
+  await page.getByRole("button", { name: "Shield" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Enter a positive amount with at most six decimal places.",
+  );
+});
+
 test("walks the connected saver journey from mint to finalized cash-out", async ({
   page,
 }) => {
