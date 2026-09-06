@@ -42,5 +42,5 @@ Last updated: 2026-09-05.
 
 ## Current blockers
 
-- None for code, deployment, or preview: `MixTogetherPool` is live on Sepolia and funded with 100 cUSDC prize reserve.
-- Remaining release collateral: video recording and independent security audit.
+- Onchain verification: Pool deployment and 100 cUSDC prize reserve funding are complete. Real Sepolia eight-slot HCU accrual/selection and two-wallet walkthrough remain open.
+- Release collateral: video recording and independent security audit.
