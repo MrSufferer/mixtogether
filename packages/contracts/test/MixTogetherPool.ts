@@ -67,6 +67,15 @@ async function decrypt64(
   );
 }
 
+/** Mock-only: ERC-7984 pool balances have no user ACL for `userDecryptEuint`. */
+async function decryptPoolTokenBalance(
+  token: TestConfidentialToken,
+  poolAddress: string,
+): Promise<bigint> {
+  const handle = await token.confidentialBalanceOf(poolAddress);
+  return fhevm.debugger.decryptEuint(FhevmType.euint64, handle);
+}
+
 async function encryptedTransferAndCall(
   token: TestConfidentialToken,
   tokenAddress: string,
@@ -321,6 +330,114 @@ describe("MixTogetherPool", function () {
     expect(await decrypt64(pool, "reserveForGuardian", guardian)).to.equal(
       5n * ONE_USDC,
     );
+  });
+
+  it("awards the funded reserve when it is below the nominal prize", async function () {
+    const { token, pool, tokenAddress, poolAddress, guardian, alice, keeper } =
+      await deployFixture();
+    const aliceAddress = await alice.getAddress();
+    const fundedReserve = 3n * ONE_USDC;
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      guardian,
+      poolAddress,
+      fundedReserve,
+      PRIZE,
+    );
+
+    await time.increase(300);
+    await pool.connect(keeper).closeDraw();
+    await pool.connect(keeper).processAccrualBatch();
+    await pool.setRandomWord(0);
+    await pool.connect(keeper).randomizeDraw();
+    await pool.connect(keeper).processSelectionBatch();
+
+    expect(await decrypt64(pool, "winningsOf", alice, aliceAddress)).to.equal(
+      fundedReserve,
+    );
+    expect(await decrypt64(pool, "winningsOf", alice, aliceAddress)).to.not.equal(
+      PRIZE_AMOUNT,
+    );
+    expect(await decrypt64(pool, "reserveForGuardian", guardian)).to.equal(0n);
+  });
+
+  it("keeps confidential token balance at least principal plus reserve plus unclaimed winnings", async function () {
+    const { token, pool, tokenAddress, poolAddress, guardian, alice, bob, keeper } =
+      await deployFixture();
+    const aliceAddress = await alice.getAddress();
+    const bobAddress = await bob.getAddress();
+
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      alice,
+      poolAddress,
+      2n * ONE_USDC,
+      DEPOSIT,
+    );
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      bob,
+      poolAddress,
+      ONE_USDC,
+      DEPOSIT,
+    );
+    await encryptedTransferAndCall(
+      token,
+      tokenAddress,
+      guardian,
+      poolAddress,
+      3n * ONE_USDC,
+      PRIZE,
+    );
+
+    const assertCovered = async () => {
+      const alicePrincipal = await decrypt64(
+        pool,
+        "principalOf",
+        alice,
+        aliceAddress,
+      );
+      const bobPrincipal = await decrypt64(pool, "principalOf", bob, bobAddress);
+      const aliceWinnings = await decrypt64(
+        pool,
+        "winningsOf",
+        alice,
+        aliceAddress,
+      );
+      const bobWinnings = await decrypt64(pool, "winningsOf", bob, bobAddress);
+      const reserve = await decrypt64(pool, "reserveForGuardian", guardian);
+      const poolBalance = await decryptPoolTokenBalance(token, poolAddress);
+      expect(poolBalance).to.be.gte(
+        alicePrincipal + bobPrincipal + reserve + aliceWinnings + bobWinnings,
+      );
+    };
+
+    await assertCovered();
+
+    await time.increase(300);
+    await pool.connect(keeper).closeDraw();
+    await pool.connect(keeper).processAccrualBatch();
+    await pool.setRandomWord(0);
+    await pool.connect(keeper).randomizeDraw();
+    await pool.connect(keeper).processSelectionBatch();
+
+    expect(await decrypt64(pool, "winningsOf", alice, aliceAddress)).to.equal(
+      3n * ONE_USDC,
+    );
+    expect(await decrypt64(pool, "reserveForGuardian", guardian)).to.equal(0n);
+    await assertCovered();
   });
 
   it("restores a reserved award when the draw has no weight", async function () {

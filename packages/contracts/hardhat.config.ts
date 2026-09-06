@@ -3,6 +3,7 @@ import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-ethers";
 import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
+import "solidity-coverage";
 
 import type { HardhatUserConfig } from "hardhat/config";
 import { vars } from "hardhat/config";

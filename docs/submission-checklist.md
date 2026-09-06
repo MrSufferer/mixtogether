@@ -42,5 +42,5 @@ Last updated: 2026-09-05.
 
 ## Current blockers
 
-- None for code, deployment, preview, or onchain smoke: pool is live, funded, verified with 8-slot HCU receipts and 2-wallet walkthrough.
-- Remaining release collateral: demo video recording and independent security audit.
+- None for code, deployment, preview, or onchain smoke: pool is live, funded, with 8-slot HCU receipts and 2-wallet walkthrough.
+- Remaining release collateral: Etherscan source + constructor verification, demo video recording, production URL/`noindex` replacement, and independent security audit.

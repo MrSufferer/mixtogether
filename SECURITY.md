@@ -17,7 +17,7 @@ MixTogether is experimental, unaudited Sepolia software using mock assets. Do no
 - An encrypted zero transfer can register a saver because the contract cannot branch on the private value. Capacity is bounded and exited slots require explicit pruning.
 - The random-range mapping uses `floor(random × totalWeight / 2^64)`. Its bias is negligible but non-zero unless total weight divides `2^64`.
 - Liveness depends on permissionless callers; no hosted keeper SLA is provided.
-- Current local FHEVM mocks exercise eight-saver HCU-limit behavior, but a real Sepolia batch smoke remains mandatory after deployment.
+- Local FHEVM mocks exercise eight-saver HCU-limit behavior. Live Sepolia eight-occupied-slot accrual and selection succeeded for this deployment (blocks 11644163 and 11644170). Later protocol-cost changes would require a new smoke.
 - Wrapper unwrapping is asynchronous and can remain pending during relayer or gateway outages.
 - `pnpm audit --prod` reports no known runtime dependency vulnerabilities. The full workspace audit still reports high-severity transitive advisories inside the pinned Zama/Hardhat build-and-test toolchain; those tools are not shipped in the static web bundle and should be upgraded when compatible upstream releases land.
 

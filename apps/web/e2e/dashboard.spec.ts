@@ -35,3 +35,58 @@ test("keeps the full dashboard inside a mobile viewport", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Private balance room" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Open" })).toBeVisible();
 });
+
+test("supports keyboard focus, labeled amount, live status, and reduced motion", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const amount = page.getByLabel("Amount");
+  await expect(amount).toBeVisible();
+  await expect(amount).toHaveAttribute("aria-describedby", "amount-help");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Contract preview mode" }),
+  ).toBeVisible();
+  await expect(page.locator(".status-bar")).toBeVisible();
+
+  let focusedControl: string | null = null;
+  for (let i = 0; i < 24; i += 1) {
+    await page.keyboard.press("Tab");
+    focusedControl = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement)) return null;
+      if (el.id === "amount") return "amount";
+      if (el.matches("button.connect-button")) return "connect";
+      return null;
+    });
+    if (focusedControl) break;
+  }
+  expect(focusedControl).not.toBeNull();
+
+  const outlineWidth = await page.evaluate(() => {
+    const el = document.activeElement;
+    return el instanceof HTMLElement ? getComputedStyle(el).outlineWidth : "0px";
+  });
+  expect(outlineWidth).not.toBe("0px");
+
+  const durations = await page.evaluate(() => {
+    const parseMs = (value: string) =>
+      value.split(",").map((part) => {
+        const trimmed = part.trim();
+        if (trimmed.endsWith("ms")) return Number.parseFloat(trimmed);
+        if (trimmed.endsWith("s")) return Number.parseFloat(trimmed) * 1000;
+        return Number.NaN;
+      });
+    const connect = document.querySelector(".connect-button");
+    const wave = document.querySelector(".pool-visual .wave");
+    return {
+      connect: connect ? parseMs(getComputedStyle(connect).transitionDuration) : [],
+      wave: wave ? parseMs(getComputedStyle(wave).transitionDuration) : [],
+    };
+  });
+  expect(durations.connect.length).toBeGreaterThan(0);
+  expect(durations.wave.length).toBeGreaterThan(0);
+  for (const ms of [...durations.connect, ...durations.wave]) {
+    expect(ms).toBeLessThan(1);
+  }
+});

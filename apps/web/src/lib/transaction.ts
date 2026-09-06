@@ -17,6 +17,17 @@ export function transactionHashOf(value: unknown): Hex | undefined {
   return transactionHashOf(record.receipt) ?? transactionHashOf(record.transaction);
 }
 
+/** viem inclusion is not success; a reverted receipt must not be treated as confirmed. */
+export function assertSuccessfulReceipt(receipt: unknown): void {
+  if (!receipt || typeof receipt !== "object") return;
+  const status = (receipt as { status?: unknown }).status;
+  if (status === "reverted" || status === 0 || status === 0n || status === "0x0") {
+    const error = new Error("The transaction was included but reverted.");
+    (error as Error & { hash?: Hex }).hash = transactionHashOf(receipt);
+    throw error;
+  }
+}
+
 export function friendlyWalletError(message: string) {
   const normalized = message.toLowerCase();
   if (normalized.includes("user rejected") || normalized.includes("user denied")) {
@@ -36,6 +47,9 @@ export function friendlyWalletError(message: string) {
   }
   if (normalized.includes("relayer") || normalized.includes("kms")) {
     return "The confidential network is temporarily unavailable. Your onchain funds are unchanged.";
+  }
+  if (normalized.includes("reverted") || normalized.includes("included but reverted")) {
+    return "The transaction reverted onchain. Nothing was transferred; try the current action again.";
   }
   return message.split("\n")[0].slice(0, 180);
 }

@@ -2,7 +2,7 @@
 phase: planning
 feature: mixtogether
 title: MixTogether implementation plan
-status: in-progress
+status: complete
 ---
 
 # MixTogether implementation plan
@@ -62,3 +62,11 @@ The external release deployment is live on Ethereum Sepolia:
 2. **Prize reserve funded:** 100 cUSDC transferred and credited to the confidential prize reserve ledger.
 3. **Vercel preview:** Updated with `VITE_POOL_ADDRESS` and verified with COOP/COEP headers and 0 console errors.
 4. **Onchain smoke verified:** Live eight-slot HCU accrual (block 11644163, gas 2,271,055), selection (block 11644170, gas 2,804,197), user decryption, cross-wallet denial, claims, and withdrawal verified.
+
+## Phase 7 Check Implementation — 2026-09-06
+
+Queue remains 18/18 done. File-by-file review found no blocking code gap and no new Phase 5 task. Alignment is complete with already-accepted deviations (branch name, injected wagmi, official token pair) plus low-severity client/operator notes recorded in the implementation doc (unwrap key namespace, request-id recovery, single reveal CTA, no keeper `pruneExited` helper).
+
+Phase 8 closed the local coverage gaps named above. Phase 9 review found no blocking fund-loss or immutable-pool defect. This branch also includes the two non-redeploy review fixes: reverted viem receipts are no longer shown as confirmed, and eight-slot smoke drains the 64-slot cursor before `randomizeDraw`. Remaining important follow-ups (winnings wipe on re-register, last-batch+finalize HCU, walkthrough vs eight-slot keys) stay in the testing doc. Remaining release follow-ups stay operator work: Etherscan verify, demo video, production URL/`noindex`, independent audit.
+
+Next: commit this branch and open the PR (`dev-pr`).

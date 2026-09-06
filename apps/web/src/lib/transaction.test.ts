@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyWalletError, transactionHashOf } from "./transaction";
+import { assertSuccessfulReceipt, friendlyWalletError, transactionHashOf } from "./transaction";
 
 const hash = `0x${"ab".repeat(32)}` as const;
 
@@ -28,5 +28,24 @@ describe("transaction feedback", () => {
     expect(friendlyWalletError("relayer request failed")).toContain(
       "temporarily unavailable",
     );
+    expect(friendlyWalletError("The transaction was included but reverted.")).toContain(
+      "reverted onchain",
+    );
+  });
+
+  it("rejects viem and numeric reverted receipts while allowing success", () => {
+    expect(() => assertSuccessfulReceipt({ status: "success", transactionHash: hash })).not.toThrow();
+    expect(() => assertSuccessfulReceipt({ status: 1, hash })).not.toThrow();
+    expect(() => assertSuccessfulReceipt(undefined)).not.toThrow();
+    expect(() => assertSuccessfulReceipt({ status: "reverted", transactionHash: hash })).toThrow(
+      /included but reverted/,
+    );
+    try {
+      assertSuccessfulReceipt({ status: 0, transactionHash: hash });
+      throw new Error("expected reverted receipt to throw");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(Error);
+      expect(transactionHashOf(cause)).toBe(hash);
+    }
   });
 });
