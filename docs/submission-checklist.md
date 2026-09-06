@@ -29,18 +29,18 @@ Last updated: 2026-09-05.
 
 ## Release
 
-- [x] Public Vercel preview: https://web-5wg8kthck-gadillacers-projects.vercel.app
+- [x] Public Vercel preview: https://web-hphdy0jc7-gadillacers-projects.vercel.app
 - [x] COOP/COEP and baseline security headers verified.
 - [x] README, architecture, security policy, demo script, X thread, and MIT license.
 - [x] CI workflow.
-- [ ] Deploy `MixTogetherPool` from a funded non-test Sepolia signer.
-- [ ] Fund the pool’s confidential prize reserve.
-- [ ] Configure `VITE_POOL_ADDRESS` and publish a transaction-enabled web deployment.
+- [x] Deploy `MixTogetherPool` from a funded non-test Sepolia signer (`0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`).
+- [x] Fund the pool’s confidential prize reserve (100 cUSDC via `confidentialTransferAndCall`).
+- [x] Configure `VITE_POOL_ADDRESS` and publish a transaction-enabled web deployment (https://web-hphdy0jc7-gadillacers-projects.vercel.app).
 - [x] Create public GitHub repository `MrSufferer/mixtogether`, push, and confirm public visibility.
 - [ ] Record and upload the demo video.
 - [ ] Replace preview/noindex URL with the final production URL in release collateral.
 
 ## Current blockers
 
-- `DEPLOYER_PRIVATE_KEY` is not yet populated in the gitignored `.env` file, so Sepolia deployment was not attempted. Live-network configuration intentionally fails closed with empty accounts rather than using Hardhat's public test mnemonic.
-The Vercel preview is deliberately transaction-disabled until the contract deployment and post-deployment smoke checks are complete.
+- None for code, deployment, or preview: `MixTogetherPool` is live on Sepolia and funded with 100 cUSDC prize reserve.
+- Remaining release collateral: video recording and independent security audit.

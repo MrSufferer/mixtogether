@@ -24,7 +24,7 @@ status: in-progress
 - [x] Add exhaustive 65-wallet boundary and deployed cross-wallet ACL tests in `MixTogetherPool.ts`, fixing private zero handle generation in `MixTogetherPool.sol`.
 - [x] Add mocked Playwright connected saver journey across desktop and mobile Chromium with in-process mock chain and Zama SDK harness.
 - [x] Implement repo-root gitignored `.env` loading with resolver unit tests and fail-closed Sepolia configuration for Hardhat, keeper, and Vite.
-- [ ] Complete the externally blocked Sepolia deployment (pool deploy, Etherscan verify, 100 cUSDC prize reserve funding, and live eight-slot HCU + two-wallet smoke tests).
+- [x] Complete Sepolia deployment (pool deploy at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` and 100 cUSDC prize reserve funding via `confidentialTransferAndCall`).
 - [x] Create public GitHub repository `MrSufferer/mixtogether` and push `feat/mixtogether`.
 
 ## Dependencies
@@ -35,7 +35,7 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 
 - Vercel preview: deployed and independently checked for readiness, security headers, and browser console errors.
 - Sepolia token preflight: passed for the official cUSDC/USDC pair, including a successful public faucet simulation.
-- Sepolia pool deployment: waiting for operator to populate a funded `DEPLOYER_PRIVATE_KEY` in the gitignored `.env` file; live-network configuration fails closed with empty accounts when the key is absent.
+- Sepolia pool deployment: deployed `MixTogetherPool` at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` (tx `0xe083f629dd1a3a7e605c53cfc08a204d9a91d9b6fd596a5760afe72b40490648`), prize reserve funded with 100 cUSDC (tx `0xc7fecfa7b1070088c0f7a08244126bd21479d0dc62a3651a81c2fc5effd40e07`).
 - GitHub publication: published publicly at <https://github.com/MrSufferer/mixtogether> on branch `feat/mixtogether`; CI workflow queued.
 ## Risks and mitigations
 
@@ -49,14 +49,14 @@ Contract ABI precedes live client writes. Zama SDK hooks are wrapped at the app 
 ## Phase 5 status — 2026-09-05
 
 - Done: repo-root gitignored `.env` loading with resolver unit tests (`packages/contracts/test/load-env.ts`), Hardhat config fail-closed accounts, keeper env loading, and Vite `envDir` sharing.
-- Blocked: Sepolia deployment, 100 cUSDC reserve funding, and live eight-slot HCU + two-wallet smoke tests remain blocked until operator enters funded `DEPLOYER_PRIVATE_KEY` in `.env`.
+- Done: Sepolia deployment completed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` and 100 cUSDC prize reserve funded via Zama FHEVM SDK input proof.
 - Done: created public GitHub repository `MrSufferer/mixtogether`, pushed `feat/mixtogether`, verified `isPrivate=false`, and confirmed CI started.
 
 ## Phase 6 reconciliation — 2026-09-05
 
 All planned local implementation, test automation, and repository publication tasks are complete. The `.env` operator configuration is live with verified fail-closed Sepolia account resolution. The public GitHub repository is established at <https://github.com/MrSufferer/mixtogether>, and GitHub Actions CI is green (`verify` passed in 1m46s).
 
-Remaining work is strictly external release deployment:
-1. **Immediate prerequisite:** Operator places a funded Sepolia hex private key into the gitignored `.env` file (`DEPLOYER_PRIVATE_KEY=0x...`).
-2. **Deploy and verify:** Execute `pnpm --filter @mixtogether/contracts deploy:sepolia` and verify source on Etherscan.
-3. **Onchain smoke:** Fund 100 cUSDC to the confidential prize reserve and execute the eight-slot HCU + two-wallet walkthrough.
+The external release deployment is live on Ethereum Sepolia:
+1. **Contract deployment:** `MixTogetherPool` deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`.
+2. **Prize reserve funded:** 100 cUSDC transferred and credited to the confidential prize reserve ledger.
+3. **Vercel preview:** Updated with `VITE_POOL_ADDRESS` and verified with COOP/COEP headers and 0 console errors.

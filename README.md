@@ -6,9 +6,9 @@ MixTogether is a confidential prize-savings pool for Ethereum Sepolia. Savers ke
 
 > **Experimental and unaudited.** MixTogether uses mock testnet assets, has no monetary value, and is not ready for production deposits. FHE hides amounts and draw outcomes; it does not hide wallet participation or transaction timing.
 
-[Open the Vercel preview](https://web-5wg8kthck-gadillacers-projects.vercel.app) · [Read the architecture](docs/architecture.md) · [Review security assumptions](SECURITY.md)
+[Open the Vercel preview](https://web-hphdy0jc7-gadillacers-projects.vercel.app) · [Read the architecture](docs/architecture.md) · [Review security assumptions](SECURITY.md)
 
-The public preview intentionally runs with transactions disabled until a funded Sepolia deployment address is configured.
+Deployed Sepolia pool contract: [`0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`](https://sepolia.etherscan.io/address/0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97).
 
 ![MixTogether desktop dashboard](output/playwright/mixtogether-desktop.png)
 
@@ -37,8 +37,9 @@ One completed draw awards up to 10 cUSDC from the separate prize reserve. Princi
 | Ticket unit | 0.1 cUSDC-second |
 | Weight | `floor(principal / 100_000) × eligibleSeconds` |
 
-Official Sepolia token pair, revalidated on 2026-09-05:
+Official Sepolia contracts:
 
+- MixTogetherPool: [`0x2971…bC97`](https://sepolia.etherscan.io/address/0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97)
 - cUSDC: [`0x7c5B…3639`](https://sepolia.etherscan.io/address/0x7c5BF43B851c1dff1a4feE8dB225b87f2C223639)
 - Mock USDC: [`0x9b5C…DfF`](https://sepolia.etherscan.io/address/0x9b5Cd13b8eFbB58Dc25A05CF411D8056058aDFfF)
 - Wrapper registry: [`0x2f07…128e`](https://sepolia.etherscan.io/address/0x2f0750Bbb0A246059d80e94c454586a7F27a128e)
@@ -145,7 +146,7 @@ SEPOLIA_RPC_URL=… POOL_ADDRESS=… KEEPER_PRIVATE_KEY=… pnpm keeper -- --wat
 - TypeScript checks, Solidity compilation, and the production Vite build pass.
 - The production dependency audit reports no known vulnerabilities; pinned Hardhat/Zama development tooling retains documented transitive advisories.
 - The Vercel preview is live with COOP `same-origin` and COEP `require-corp`.
-- Sepolia token validation passes; pool deployment is pending a funded, non-test deployer.
+- Sepolia deployment is live: pool contract deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`, funded with 100 cUSDC prize reserve, and verified on chain.
 - GitHub source repository is published publicly at <https://github.com/MrSufferer/mixtogether> with passing CI.
 
 See [the submission checklist](docs/submission-checklist.md) for the exact release blockers and [the demo script](docs/demo-video-script.md) for a sub-three-minute walkthrough.

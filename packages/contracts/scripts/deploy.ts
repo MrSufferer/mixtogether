@@ -46,11 +46,17 @@ async function main() {
   );
   console.log(JSON.stringify(record, null, 2));
 
-  if (vars.get("ETHERSCAN_API_KEY", "")) {
-    await run("verify:verify", {
-      address,
-      constructorArguments: [validation.wrapper, guardian],
-    });
+  const etherscanKey =
+    process.env.ETHERSCAN_API_KEY || vars.get("ETHERSCAN_API_KEY", "");
+  if (etherscanKey) {
+    try {
+      await run("verify:verify", {
+        address,
+        constructorArguments: [validation.wrapper, guardian],
+      });
+    } catch (verifyError: any) {
+      console.warn("Etherscan verification skipped or failed:", verifyError?.message || verifyError);
+    }
   }
 }
 

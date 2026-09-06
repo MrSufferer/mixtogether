@@ -29,6 +29,7 @@ status: in-progress
 - 2026-09-05: implemented mocked Playwright connected saver journey across desktop and mobile Chromium with in-page FSM store, minimal EIP-1193 chain transport, and Zama SDK mock aliases under `VITE_E2E_MOCK=1` on dedicated port 4174; verified zero mock leakage into production build.
 - 2026-09-05: implemented repo-root gitignored `.env` loading for Hardhat, keeper, and Vite (`envDir`) with resolver unit tests; confirmed fail-closed Sepolia account configuration and scaffolded gitignored `.env` template.
 - 2026-09-05: created public GitHub repository `MrSufferer/mixtogether` and pushed `feat/mixtogether`; confirmed `isPrivate=false` and CI workflow trigger.
+- 2026-09-05: deployed `MixTogetherPool` to Sepolia at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` (tx `0xe083f629dd1a3a7e605c53cfc08a204d9a91d9b6fd596a5760afe72b40490648`); funded 100 cUSDC prize reserve via `confidentialTransferAndCall` (tx `0xc7fecfa7b1070088c0f7a08244126bd21479d0dc62a3651a81c2fc5effd40e07`).
 ## Decisions
 
 - Use the official cUSDC mock pair; custom faucet/wrapper is a deployment-only fallback after an explicit failed validation.
@@ -40,10 +41,9 @@ status: in-progress
 - Stable RainbowKit currently targets wagmi v2 while the Zama React adapter targets wagmi v3. The app uses wagmi's standard injected connector through an accessible custom wallet control and remains compatible with EIP-1193 browser wallets.
 - The official mock USDC faucet simulation passed, so the fallback `MixUSDC` and stock wrapper were intentionally not deployed.
 - An encrypted-zero callback is accepted as required and may consume one of the bounded registry slots because Solidity cannot branch on its private value.
-- A live pool address, source verification, prize funding, and deployed two-wallet/HCU smoke test remain pending a funded Sepolia deployer key entered in the gitignored `.env`.
-- GitHub CLI credential is authenticated as `MrSufferer`; public repository creation and push is unblocked.
-- GitHub repository `MrSufferer/mixtogether` is created and public at <https://github.com/MrSufferer/mixtogether>; CI is active on `feat/mixtogether`.
-- Live Sepolia deployment, HCU receipts, and reserve funding remain blocked by external deployer key funding and are not claimed as locally complete.
+- `MixTogetherPool` is deployed on Sepolia at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`; confidential prize reserve funded with 100 cUSDC.
+- GitHub repository `MrSufferer/mixtogether` is created and public at <https://github.com/MrSufferer/mixtogether>; CI is active and passing on `feat/mixtogether`.
+- Vercel preview redeployed at <https://web-hphdy0jc7-gadillacers-projects.vercel.app> with live `VITE_POOL_ADDRESS`.
 ## Phase 7 alignment review — 2026-09-05
 
 - Contract design alignment: `exitDrawId` is public metadata only; encrypted principal, weight, reserve, and winnings remain ciphertext handles with unchanged ACL boundaries. Pruning remains permissionless and idempotent, skipping empty, non-exited, and not-yet-matured slots while processing other supplied slots.
