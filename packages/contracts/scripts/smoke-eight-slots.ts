@@ -137,7 +137,7 @@ export async function runEightSlotSmoke() {
   // 1. Initialize 8 deterministic wallets
   const wallets: Wallet[] = [];
   for (let i = 0; i < 8; i++) {
-    const subKey = keccak256(toUtf8Bytes(`mixtogether:smoke:saver:${i}`));
+    const subKey = keccak256(toUtf8Bytes(`${config.deployerKey}:saver:${i}`));
     const subWallet = new Wallet(subKey, provider);
     wallets.push(subWallet);
   }
