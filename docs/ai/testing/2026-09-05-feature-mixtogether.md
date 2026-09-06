@@ -41,7 +41,7 @@ Local unit, contract, build, and browser gates are rerun immediately before hand
 
 ## Handoff evidence — 2026-09-05
 
-- `pnpm check`: passed; 28 contract tests (15 pool + 8 resolver + 5 smoke helpers) and 13 web unit tests.
+- `pnpm check`: passed; 32 contract tests (15 pool + 8 resolver + 5 smoke + 4 eight-slot helpers) and 13 web unit tests.
 - `pnpm build`: passed with Solidity `0.8.27` and Vite `7.3.5`.
 - `pnpm test:e2e`: passed; six desktop/mobile Chromium checks (4 preview + 2 connected saver journey).
 - `pnpm audit --prod --audit-level high`: no known vulnerabilities.
@@ -55,9 +55,9 @@ Local unit, contract, build, and browser gates are rerun immediately before hand
 - Smoke helper regression: 5 passing tests in `packages/contracts/test/smoke-sepolia.ts` asserting uint8 ABI encoding and fail-closed configuration.
 - Web targeted regression: 5 passing tests covering canonical transaction hashes and privacy-safe draw labels/copy helpers.
 - ABI export completed after the public `exitDrawId(address)` interface addition.
-- Sepolia live evidence: pool deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` (tx `0xe083f629dd1a3a7e605c53cfc08a204d9a91d9b6fd596a5760afe72b40490648`) and prize reserve funded with 100 cUSDC (tx `0xc7fecfa7b1070088c0f7a08244126bd21479d0dc62a3651a81c2fc5effd40e07`).
+- Sepolia live evidence: pool deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` (tx `0xe083f629dd1a3a7e605c53cfc08a204d9a91d9b6fd596a5760afe72b40490648`), prize reserve funded with 100 cUSDC (tx `0xc7fecfa7b1070088c0f7a08244126bd21479d0dc62a3651a81c2fc5effd40e07`), eight-slot HCU accrual (tx `0xe3ed691d8b1f9b2926f5b995c6087f9ea1f8917d5fdbe6410098c4d7e4e6eb55`, block 11644163, gas 2,271,055), eight-slot HCU selection (tx `0xd2b5a77d9c9ce78728fda476a92c5e15129024ccdee624dc29ab2882ac5d69f3`, block 11644170, gas 2,804,197), user decryption verified (1,000,000 clear value), cross-wallet decrypt denial confirmed, claim transactions confirmed (blocks 11644187, 11644188), and withdrawal confirmed (block 11644189).
 ## Phase 8/9 result — 2026-09-05
 
 - Coverage additions are linked to `packages/contracts/test/MixTogetherPool.ts`, `apps/web/src/lib/transaction.test.ts`, `apps/web/src/lib/draw.test.ts`, and `apps/web/e2e/dashboard.spec.ts`.
-- Full local gates are green: 28 contract tests, 13 web unit tests, 6 Playwright checks (4 preview + 2 connected saver journey), production build, production audit, and whitespace validation.
-- No new local coverage gap was found for the changed behaviors; Sepolia-only HCU, two-wallet, and publication checks remain explicitly blocked release tasks.
+- Full local gates are green: 32 contract tests, 13 web unit tests, 6 Playwright checks (4 preview + 2 connected saver journey), production build, production audit, and whitespace validation.
+- Sepolia live evidence confirmed: contract deployment, reserve funding, 8-saver HCU accrual & selection, and two-wallet walkthrough are complete on chain.

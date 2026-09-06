@@ -40,6 +40,6 @@ The pool is immutable and non-upgradeable. A broken deployment is superseded by 
 - Official pair preflight passed on chain `11155111`: code, six-decimal assets, 1:1 wrapper rate, underlying relationship, registry mappings, registry validity, and public faucet simulation.
 - `MixTogetherPool` deployed to Sepolia at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` (tx `0xe083f629dd1a3a7e605c53cfc08a204d9a91d9b6fd596a5760afe72b40490648`, block 11643952) with guardian `0xeD37FD0d6F0f69236E7472B36796e133D20EcC32`.
 - Prize reserve funded with 100 cUSDC via `confidentialTransferAndCall` (tx `0xc7fecfa7b1070088c0f7a08244126bd21479d0dc62a3651a81c2fc5effd40e07`, block 11643972) using Zama FHEVM SDK input proof.
-- Vercel preview updated and reached `READY` at <https://web-hphdy0jc7-gadillacers-projects.vercel.app> (deployment `dpl_2iXgSbwVY9rq5YLkJXren2iGhHDw`) with `VITE_POOL_ADDRESS=0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`.
+- Vercel preview updated and reached `READY` at <https://web-e9stkxv3e-gadillacers-projects.vercel.app> (deployment `dpl_FNwLWit2SbDq8bnrFuiDZX656fyG`) with `VITE_POOL_ADDRESS=0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` verified inside the bundle.
 - The preview returned HTTP 200 with COOP `same-origin`, COEP `require-corp`, HSTS, `nosniff`, and loaded with 0 browser console errors.
 - GitHub source publication is complete; public repository is live at <https://github.com/MrSufferer/mixtogether> with active CI on `feat/mixtogether`.

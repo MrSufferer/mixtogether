@@ -26,7 +26,7 @@ status: in-progress
 - [x] Implement repo-root gitignored `.env` loading with resolver unit tests and fail-closed Sepolia configuration for Hardhat, keeper, and Vite.
 - [x] Complete Sepolia deployment (pool deploy at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97` and 100 cUSDC prize reserve funding via `confidentialTransferAndCall`).
 - [x] Create public GitHub repository `MrSufferer/mixtogether` and push `feat/mixtogether`.
-- [ ] Real Sepolia eight-occupied-slot HCU accrual/selection receipts and deployed two-wallet walkthrough.
+- [x] Real Sepolia eight-occupied-slot HCU accrual/selection receipts and deployed two-wallet walkthrough.
 
 ## Dependencies
 
@@ -61,4 +61,4 @@ The external release deployment is live on Ethereum Sepolia:
 1. **Contract deployment:** `MixTogetherPool` deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`.
 2. **Prize reserve funded:** 100 cUSDC transferred and credited to the confidential prize reserve ledger.
 3. **Vercel preview:** Updated with `VITE_POOL_ADDRESS` and verified with COOP/COEP headers and 0 console errors.
-4. **Remaining open verification:** Live eight-slot HCU accrual/selection and deployed two-wallet walkthrough.
+4. **Onchain smoke verified:** Live eight-slot HCU accrual (block 11644163, gas 2,271,055), selection (block 11644170, gas 2,804,197), user decryption, cross-wallet denial, claims, and withdrawal verified.

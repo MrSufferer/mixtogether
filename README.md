@@ -6,7 +6,7 @@ MixTogether is a confidential prize-savings pool for Ethereum Sepolia. Savers ke
 
 > **Experimental and unaudited.** MixTogether uses mock testnet assets, has no monetary value, and is not ready for production deposits. FHE hides amounts and draw outcomes; it does not hide wallet participation or transaction timing.
 
-[Open the Vercel preview](https://web-hphdy0jc7-gadillacers-projects.vercel.app) · [Read the architecture](docs/architecture.md) · [Review security assumptions](SECURITY.md)
+[Open the Vercel preview](https://web-e9stkxv3e-gadillacers-projects.vercel.app) · [Read the architecture](docs/architecture.md) · [Review security assumptions](SECURITY.md)
 
 Deployed Sepolia pool contract: [`0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`](https://sepolia.etherscan.io/address/0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97).
 
