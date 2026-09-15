@@ -1,0 +1,44 @@
+pragma language_version >= 0.22 && <= 0.23;
+
+import CompactStandardLibrary;
+
+// Shroudly compatibility profile: Compact language 0.5.1 / compiler 0.31.1.
+// The reference asset is shielded and valueless. Every issuance path shares one cap.
+export ledger totalIssued: Uint<64>;
+export ledger cap: Uint<64>;
+export ledger faucetEpoch: Uint<64>;
+export ledger automationIssued: Boolean;
+export ledger faucetNullifiers: Set<Bytes<32>>;
+export ledger custodyCommitments: Set<Bytes<32>>;
+
+constructor() {
+  totalIssued = 1000000000000;
+  cap = 10000000000000;
+  faucetEpoch = 0;
+  automationIssued = false;
+  custodyCommitments.insert(disclose(pad(32, "prize-reserve")));
+}
+
+export pure circuit faucetNullifier(owner: Bytes<32>, epoch: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/faucet/v1"), owner, epoch]);
+}
+
+export circuit claimFaucet(owner: Bytes<32>, epoch: Uint<64>): [] {
+  const claim = faucetNullifier(owner, epoch);
+  assert(epoch >= faucetEpoch, "faucet epochs cannot move backwards");
+  assert(!faucetNullifiers.member(disclose(claim)), "faucet epoch already claimed");
+  assert(totalIssued + 1000000000 <= cap, "tMIX supply cap exceeded");
+  faucetNullifiers.insert(disclose(claim));
+  custodyCommitments.insert(disclose(owner));
+  totalIssued = (totalIssued + 1000000000) as Uint<64>;
+  faucetEpoch = disclose(epoch);
+}
+
+export circuit allocateAutomation(fixture: Bytes<32>): [] {
+  assert(!automationIssued, "automation allocation already issued");
+  assert(fixture == pad(32, "evidence-fixture"), "automation allocation is isolated");
+  assert(totalIssued + 25000000000 <= cap, "tMIX supply cap exceeded");
+  automationIssued = true;
+  totalIssued = (totalIssued + 25000000000) as Uint<64>;
+  custodyCommitments.insert(disclose(fixture));
+}

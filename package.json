@@ -1,19 +1,24 @@
 {
-  "name": "mixtogether",
+  "name": "shroudly",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@8.15.9",
   "scripts": {
-    "build": "pnpm --filter @mixtogether/contracts build && pnpm --filter @mixtogether/web build",
+    "build": "pnpm -r build",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "test:contracts": "pnpm --filter @mixtogether/contracts test",
-    "test:web": "pnpm --filter @mixtogether/web test",
-    "test:e2e": "pnpm --filter @mixtogether/web test:e2e",
-    "dev": "pnpm --filter @mixtogether/web dev",
-    "keeper": "pnpm --filter @mixtogether/contracts keeper"
+    "test:contracts": "pnpm --filter @shroudly/contracts test",
+    "test:web": "pnpm --filter @shroudly/web test",
+    "test:e2e": "pnpm --filter @shroudly/web test:e2e",
+    "dev": "pnpm --filter @shroudly/web dev",
+    "test:sponsor": "pnpm --filter @shroudly/sponsor test",
+    "midnight:profile": "node scripts/midnight-profile.mjs",
+    "midnight:compile": "node scripts/compile-midnight.mjs --skip-zk",
+    "midnight:compile:keys": "node scripts/compile-midnight.mjs",
+    "midnight:test": "pnpm --filter @shroudly/web test && pnpm --filter @shroudly/contracts test",
+    "midnight:check": "pnpm midnight:profile && pnpm midnight:compile && pnpm midnight:test"
   },
   "engines": {
     "node": ">=22"

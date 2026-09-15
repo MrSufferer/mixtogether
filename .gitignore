@@ -19,6 +19,9 @@ test-results/
 .vercel/
 deployments/local/
 *.log
+midnight/managed/
+evidence/
+.shroudly-reset/
 
 # AI DevKit installs machine-local absolute skill symlinks. The portable
 # manifest is tracked in .ai-devkit.json.

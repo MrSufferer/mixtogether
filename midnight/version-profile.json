@@ -1,0 +1,30 @@
+{
+  "profile": "shroudly-midnight-preprod-v1",
+  "status": "preprod-qualifying",
+  "compactLanguage": "0.5.1",
+  "compactCompiler": "0.31.1",
+  "compactRuntime": "0.16.0",
+  "midnightJs": "4.1.1",
+  "walletSdk": "1.2.0",
+  "dappConnector": "4.0.1",
+  "node": "1.0.2",
+  "indexer": "4.3.3-hotfix",
+  "proofServer": "8.1.0",
+  "network": {
+    "name": "preprod",
+    "rpc": "https://rpc.preprod.midnight.network",
+    "indexerGraphql": "https://indexer.preprod.midnight.network/api/v4/graphql",
+    "defaultProofMode": "local"
+  },
+  "gates": {
+    "compactCompile": true,
+    "zkKeysGenerated": false,
+    "propertyMatrix": true,
+    "adversarialReplayMatrix": true,
+    "scaleMatrix": true,
+    "providerProvisioned": false,
+    "browserEvidence": false,
+    "productionApproval": false,
+    "mainnetTransactionsEnabled": false
+  }
+}

@@ -1,0 +1,102 @@
+pragma language_version >= 0.22 && <= 0.23;
+
+import CompactStandardLibrary;
+
+// The pool accepts only shielded tMIX commitments and private account notes.
+// Component pins are public configuration, while note ownership stays private.
+export ledger assetComponent: Bytes<32>;
+export ledger randomnessComponent: Bytes<32>;
+export ledger yieldComponent: Bytes<32>;
+export ledger disclosureCohort: Uint<64>;
+export ledger principalReserve: Uint<64>;
+export ledger totalShareTwab: Uint<64>;
+export ledger drawId: Uint<64>;
+export ledger drawCutoff: Uint<64>;
+export ledger winningCommitment: Bytes<32>;
+export ledger claimNullifiers: Set<Bytes<32>>;
+export ledger contributionPaused: Boolean;
+export ledger withdrawalPaused: Boolean;
+export ledger settlementPaused: Boolean;
+export ledger deployerActive: Boolean;
+export ledger submissionLocked: Boolean;
+export ledger deployerRemovalDeadline: Uint<64>;
+
+constructor(asset: Bytes<32>, randomness: Bytes<32>, yieldAdapter: Bytes<32>) {
+  assetComponent = disclose(asset);
+  randomnessComponent = disclose(randomness);
+  yieldComponent = disclose(yieldAdapter);
+  disclosureCohort = 5;
+  principalReserve = 0;
+  totalShareTwab = 0;
+  drawId = 1;
+  drawCutoff = 900;
+  winningCommitment = pad(32, "");
+  contributionPaused = false;
+  withdrawalPaused = false;
+  settlementPaused = false;
+  deployerActive = true;
+  submissionLocked = false;
+  deployerRemovalDeadline = 86400;
+}
+
+export pure circuit ownerCommitment(secret: Bytes<32>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/owner/v1"), secret, salt]);
+}
+
+export pure circuit accountNoteCommitment(owner: Bytes<32>, shares: Uint<64>, twab: Uint<64>, updatedAt: Uint<64>, nonce: Uint<64>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>, Uint<64>, Uint<64>, Uint<64>, Bytes<32>]>([pad(32, "Shroudly/account/v1"), owner, shares, twab, updatedAt, nonce, salt]);
+}
+
+export pure circuit winningCommitmentFor(owner: Bytes<32>, draw: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/winning/v1"), owner, draw]);
+}
+
+export pure circuit claimNullifier(owner: Bytes<32>, draw: Uint<64>, winning: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>, Bytes<32>]>([pad(32, "Shroudly/claim/v1"), owner, draw, winning]);
+}
+
+export circuit contribute(note: Bytes<32>, amount: Uint<64>, now: Uint<64>): [] {
+  if (deployerActive && disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
+  assert(!submissionLocked, "submissions are locked pending deployer removal");
+  assert(!contributionPaused, "contributions paused");
+  assert(!settlementPaused, "settlement paused");
+  assert(amount >= 1000000 && amount <= 1000000000, "contribution bounds violated");
+  principalReserve = (principalReserve + disclose(amount)) as Uint<64>;
+  totalShareTwab = (totalShareTwab + disclose(amount) * disclose(now)) as Uint<64>;
+  assert(note != pad(32, ""), "private account note required");
+}
+
+export circuit withdraw(amount: Uint<64>): [] {
+  assert(!submissionLocked, "submissions are locked pending deployer removal");
+  assert(!withdrawalPaused, "withdrawals paused");
+  assert(!settlementPaused, "settlement paused");
+  assert(disclose(amount) > 0 && disclose(amount) <= principalReserve, "withdrawal exceeds Principal custody");
+  principalReserve = (principalReserve - disclose(amount)) as Uint<64>;
+}
+
+export circuit finalize(winning: Bytes<32>, cohortSize: Uint<64>, now: Uint<64>): [] {
+  if (deployerActive && disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
+  assert(!submissionLocked, "submissions are locked pending deployer removal");
+  assert(!settlementPaused, "settlement paused");
+  assert(cohortSize >= disclosureCohort, "Disclosure Cohort is not met");
+  assert(now >= drawCutoff, "draw cutoff has not elapsed");
+  assert(winning != pad(32, ""), "winning commitment required");
+  winningCommitment = disclose(winning);
+}
+
+export circuit claim(secret: Bytes<32>, salt: Bytes<32>): [] {
+  assert(!settlementPaused, "settlement paused");
+  const owner = ownerCommitment(secret, salt);
+  const nullifier = claimNullifier(owner, drawId, winningCommitment);
+  assert(!claimNullifiers.member(disclose(nullifier)), "claim nullifier already consumed");
+  assert(winningCommitment == winningCommitmentFor(owner, drawId), "private winner ownership proof failed");
+  claimNullifiers.insert(disclose(nullifier));
+}
+
+export circuit pauseContributions(): [] { contributionPaused = true; }
+export circuit resumeContributions(): [] { contributionPaused = false; }
+export circuit pauseWithdrawals(): [] { withdrawalPaused = true; }
+export circuit resumeWithdrawals(): [] { withdrawalPaused = false; }
+export circuit pauseSettlement(): [] { settlementPaused = true; }
+export circuit resumeSettlement(): [] { settlementPaused = false; }
+export circuit removeDeployer(now: Uint<64>): [] { assert(now >= deployerRemovalDeadline, "deployer deadline has not elapsed"); if (disclose(now) > deployerRemovalDeadline) { submissionLocked = true; } deployerActive = false; }
