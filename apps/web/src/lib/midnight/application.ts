@@ -10,6 +10,16 @@ import { fromMicroUnits, toMicroUnits } from "./constants";
 
 export type ParticipantCommand = "faucetClaim" | "contribute" | "withdraw" | "checkpointYield" | "finalizeDraw" | "claimPrize";
 
+export type SponsorshipRequest = Readonly<{
+  command: ParticipantCommand;
+  amount?: bigint;
+  wallet: WalletSnapshot;
+  deploymentId: string;
+}>;
+
+/** Injected at the adapter boundary by the Render Sponsor Service deployment. */
+export type SponsorExecutor = (request: SponsorshipRequest) => Promise<void>;
+
 export interface ParticipantApplication {
   readonly snapshot: ParticipantSnapshot;
   connect(walletId?: string): Promise<WalletSnapshot>;
@@ -36,7 +46,7 @@ export interface ParticipantAdapter {
   connect(walletId: string): Promise<WalletSnapshot>;
   disconnect(): Promise<void>;
   currentWallet(): WalletSnapshot | null;
-  command(command: ParticipantCommand, amount?: bigint): Promise<CommandReceipt>;
+  command(command: ParticipantCommand, amount?: bigint, sponsorship?: SponsorshipChoice): Promise<CommandReceipt>;
   account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint };
   draw(): ParticipantSnapshot["draw"];
   advanceTime?(seconds: bigint): void;
@@ -141,7 +151,7 @@ export class ParticipantApplicationClient implements ParticipantApplication {
     if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a supported Preprod wallet first");
     if (command === "contribute" && !this.recoveryReady) throw new ParticipantError("RECOVERY_NOT_READY", "complete the Recovery Kit export and restore drill before contributing");
     if (this.outage) throw new ParticipantError("OUTAGE", this.outage, true);
-    try { const receipt = await this.adapter.command(command, amount); this.emit(); return { ...receipt, sponsorship: this.sponsorship }; }
+    try { const receipt = await this.adapter.command(command, amount, this.sponsorship); this.emit(); return receipt; }
     catch (cause) { if (cause instanceof ParticipantError) throw cause; throw new ParticipantError("OUTAGE", cause instanceof Error ? cause.message : "Preprod transaction failed", true); }
   }
 
@@ -159,21 +169,30 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
   private nowSeconds: bigint;
   private wallet: WalletSnapshot | null = null;
   private secret: Hex | null = null;
+  private readonly sponsor?: SponsorExecutor;
   // The deterministic adapter must produce the same private state for the
   // same wallet across runs.  A wallet-scoped salt still keeps the owner
   // commitment separate from the wallet's public address without relying on
   // process-local randomness.
   private salt: Hex | null = null;
 
-  public constructor(options: { deploymentId?: string; startTime?: bigint; pool?: PrizePoolLedger } = {}) { this.deploymentId = options.deploymentId ?? "shroudly-preprod-deterministic"; this.nowSeconds = options.startTime ?? 0n; this.pool = options.pool ?? new PrizePoolLedger("preprod", this.deploymentId, this.nowSeconds); }
+  public constructor(options: { deploymentId?: string; startTime?: bigint; pool?: PrizePoolLedger; sponsor?: SponsorExecutor } = {}) { this.deploymentId = options.deploymentId ?? "shroudly-preprod-deterministic"; this.nowSeconds = options.startTime ?? 0n; this.pool = options.pool ?? new PrizePoolLedger("preprod", this.deploymentId, this.nowSeconds); this.sponsor = options.sponsor; }
   public async connect(walletId: string): Promise<WalletSnapshot> { if (!walletId.trim()) throw new ParticipantError("UNSUPPORTED_WALLET", "a wallet id is required"); this.secret = hashWords(domain("wallet/secret/v1"), walletId); this.salt = bytes32WalletSalt(walletId); this.wallet = { walletId, address: hashWords(domain("wallet/address/v1"), walletId), network: "preprod", apiVersion: "4.0.1" }; return this.wallet; }
   public async disconnect(): Promise<void> { this.wallet = null; this.secret = null; this.salt = null; }
   public currentWallet(): WalletSnapshot | null { return this.wallet; }
   public advanceTime(seconds: bigint): void { if (seconds < 0n) throw new Error("time cannot move backwards"); this.nowSeconds += seconds; }
   public seedWallet(walletId: string): void { this.pool.faucetClaim(hashWords(domain("wallet/secret/v1"), walletId), bytes32WalletSalt(walletId), this.nowSeconds); }
-  public async command(command: ParticipantCommand, amount?: bigint): Promise<CommandReceipt> {
+  public async command(command: ParticipantCommand, amount?: bigint, sponsorship: SponsorshipChoice = "participant-funded"): Promise<CommandReceipt> {
     if (!this.secret || !this.wallet || !this.salt) throw new ParticipantError("AUTHORIZATION_REJECTED", "wallet is not connected");
     const secret = this.secret; const salt = this.salt;
+    if (sponsorship === "sponsored" && !this.sponsor) throw new ParticipantError("SPONSOR_REJECTED", "DUST Sponsor Service is not configured; choose wallet-funded DUST", true);
+    if (sponsorship === "sponsored") {
+      try { await this.sponsor!({ command, amount, wallet: this.wallet, deploymentId: this.deploymentId }); }
+      catch (cause) {
+        const message = cause instanceof Error ? cause.message : "DUST sponsorship was rejected";
+        throw new ParticipantError(message.toLowerCase().includes("timeout") ? "SPONSOR_TIMEOUT" : "SPONSOR_REJECTED", `${message}; choose wallet-funded DUST`, true);
+      }
+    }
     if (command === "faucetClaim") this.pool.faucetClaim(secret, salt, this.nowSeconds);
     else if (command === "contribute") this.pool.contribute(secret, salt, amount ?? 0n, this.nowSeconds);
     else if (command === "withdraw") this.pool.withdraw(secret, salt, amount ?? 0n, this.nowSeconds);
@@ -181,7 +200,7 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
     else if (command === "finalizeDraw") { this.ensureRandomness(); this.pool.finalizeDraw(this.nowSeconds); }
     else if (command === "claimPrize") this.pool.claimPrize(secret, salt, this.nowSeconds);
     const transactionId = hashWords(domain("transaction/v1"), this.wallet.address as Hex, command, String(this.nowSeconds));
-    return { transactionId, action: command, status: "finalized", finalizedAt: Number(this.nowSeconds), indexerVisible: true, ledgerConfirmed: true, sponsorship: "participant-funded" };
+    return { transactionId, action: command, status: "finalized", finalizedAt: Number(this.nowSeconds), indexerVisible: true, ledgerConfirmed: true, sponsorship };
   }
   public account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint } { if (!this.secret || !this.salt) return { balanceMicroUnits: 0n, principalMicroUnits: 0n, twabSeconds: 0n, unclaimedPrizeMicroUnits: 0n }; const account = this.pool.account(this.secret, this.salt, this.nowSeconds); const owner = deriveOwnerCommitment(this.secret, this.salt); return { balanceMicroUnits: this.pool.asset.balanceOf(owner), principalMicroUnits: account.principalMicroUnits, twabSeconds: account.twabSeconds, unclaimedPrizeMicroUnits: this.pool.unclaimedPrize(this.secret, this.salt) }; }
   public draw(): ParticipantSnapshot["draw"] { return this.pool.snapshot(this.nowSeconds).draw; }

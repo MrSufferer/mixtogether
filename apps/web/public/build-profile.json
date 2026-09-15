@@ -11,9 +11,9 @@
   },
   "artifactHashes": [
     "0x6ad7a4555566af7bf6a64f056bf5485d22f1bff586c4112a83adac2e116ce0c1",
-    "0x338a5003c0ea4118b92d1825041a1cc9e4a89b8820064f8794364b7bdd3c4e97",
+    "0xf9599a3f7eadfd0a6fd7bf2528f0a4e4969710eeb45a285502153c256f966375",
     "0xd5f489081488ef6d669b2449de02cdd9dac9f264408d8ea6110f7bd5eae38caf",
-    "0x72708f7455d6e883364766035e0e58f9241f8664fab403a9c9eb2de164e12bb8"
+    "0x2bf76bb826cfff35cfbdb59ddad6996989bdd2a88eb429603a937704b1931d26"
   ],
   "endpoints": {
     "rpc": "https://rpc.preprod.midnight.network",
@@ -59,5 +59,5 @@
   "governance": "two-of-three-preprod",
   "deployerDeadlineSeconds": "86400",
   "mainnetTransactionsEnabled": false,
-  "snapshotHash": "0xa7ab0b6e5987497a51cc236b24d3629355664cf0917deb18ffefaf37d79756e0"
+  "snapshotHash": "0x0dc3184f0e10c811a971a5157f154a7379482cabb8d55b255dcdfec380effa00"
 }

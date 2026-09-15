@@ -144,17 +144,41 @@ describe("Shroudly Preprod protocol reference", () => {
     expect(() => pool.claimPrize(winner!.secret, winner!.salt, finalized.revealClosesAt)).toThrow(/already.*consumed|no unclaimed/);
     pool.assertSolvent();
   });
+
+  test("rolls an expired prize into the next draw without making reserve negative", () => {
+    const pool = new PrizePoolLedger("preprod", "rollover-test", 0n);
+    const participants = Array.from({ length: PROGRAM_CONSTANTS.disclosureCohort }, (_, index) => ({
+      secret: secret((index + 90).toString(16).padStart(2, "0")),
+      salt: secret((index + 120).toString(16).padStart(2, "0")),
+    }));
+    for (const participant of participants) {
+      pool.faucetClaim(participant.secret, participant.salt, 0n);
+      pool.contribute(participant.secret, participant.salt, toMicroUnits("1"), 0n);
+    }
+    const draw = pool.snapshot(0n).draw;
+    for (const contributor of ["render", "github-actions", "offline-maintainer"]) {
+      const reveal = pool.deriveReveal(secret(contributor === "render" ? "c1" : contributor === "github-actions" ? "c2" : "c3"));
+      pool.commitRandomness(contributor, pool.commitForReveal(reveal, contributor), draw.commitCutoff - 1n);
+      pool.revealRandomness(contributor, reveal, draw.revealOpensAt);
+    }
+    pool.checkpointYield(draw.closesAt);
+    const finalized = pool.finalizeDraw(draw.revealClosesAt);
+    const expiry = finalized.revealClosesAt + PROGRAM_CONSTANTS.claimWindowSeconds + 1n;
+    expect(pool.rolloverExpired(expiry)).toBe(finalized.prizeMicroUnits);
+    pool.assertSolvent();
+    expect(pool.snapshot(expiry).draw.drawId).toBe(2n);
+  });
 });
 
 describe("Winning predicate boundaries", () => {
-  test("scales weighted zones into the public ticket domain", () => {
+  test("scales weighted zones into the public selection domain", () => {
     expect(boundedWinningZone(10n, 10n, 1n, 100n)).toBe(100n);
     expect(boundedWinningZone(5n, 10n, 1n, 100n)).toBe(50n);
   });
 
   test("treats an empty public domain as a non-winning predicate", () => {
     const note = { ownerCommitment: OWNER, principalShares: 1n, accumulatedBalanceSeconds: 0n, lastUpdate: 0n, nonce: 0n, salt: SALT } as const;
-    const result = evaluateWinningPredicate({ note, cutoffTime: 1n, totalShareTwab: 1n, expectedWinnerCount: 1n, publicSupply: 0n, randomness: OWNER, drawId: 1n, ownerSecret: OWNER, ticketSalt: SALT });
+    const result = evaluateWinningPredicate({ note, cutoffTime: 1n, totalShareTwab: 1n, expectedWinnerCount: 1n, selectionDomain: 0n, randomness: OWNER, drawId: 1n, ownerSecret: OWNER, selectionSalt: SALT });
     expect(result.win).toBe(false);
     expect(result.reduction.accepted).toBe(false);
   });
@@ -196,5 +220,24 @@ describe("ParticipantApplication public seam", () => {
     await expect(application.connect("wallet-test")).resolves.toMatchObject({ network: "preprod", apiVersion: "4.0.1" });
     await expect(application.faucetClaim()).resolves.toMatchObject({ status: "finalized", indexerVisible: true, ledgerConfirmed: true });
     expect(application.snapshot.privateBalanceMicroUnits).toBe(PROGRAM_CONSTANTS.faucetAmountMicroUnits);
+  });
+
+  test("routes an explicit sponsorship choice through the adapter and preserves a wallet fallback", async () => {
+    const requests: string[] = [];
+    const application = createParticipantApplication(new DeterministicPreprodAdapter({
+      startTime: 0n,
+      sponsor: async ({ command, wallet }) => { requests.push(`${command}:${wallet.walletId}`); },
+    }));
+    await application.connect("wallet-sponsored");
+    application.setSponsorship("sponsored");
+    await expect(application.faucetClaim()).resolves.toMatchObject({ sponsorship: "sponsored" });
+    expect(requests).toEqual(["faucetClaim:wallet-sponsored"]);
+
+    const rejected = createParticipantApplication(new DeterministicPreprodAdapter({ startTime: 0n }));
+    await rejected.connect("wallet-fallback");
+    rejected.setSponsorship("sponsored");
+    await expect(rejected.faucetClaim()).rejects.toMatchObject({ code: "SPONSOR_REJECTED", retryable: true });
+    rejected.setSponsorship("participant-funded");
+    await expect(rejected.faucetClaim()).resolves.toMatchObject({ sponsorship: "participant-funded" });
   });
 });

@@ -59,8 +59,12 @@ export class SimulatedYieldAdapter {
   }
 
   public settle(winnerCount: bigint): Payout {
-    const payout = payoutForBudget(this.prizeReserveMicroUnits + this.rolloverMicroUnits, winnerCount);
-    this.prizeReserveMicroUnits -= payout.liability;
+    const budget = this.prizeReserveMicroUnits + this.rolloverMicroUnits;
+    const payout = payoutForBudget(budget, winnerCount);
+    // The settlement consumes the entire available budget.  Any indivisible
+    // remainder is explicitly carried as Prize Rollover; it must not be
+    // subtracted from the fresh reserve a second time on the next draw.
+    this.prizeReserveMicroUnits = 0n;
     this.rolloverMicroUnits = payout.rollover;
     return payout;
   }

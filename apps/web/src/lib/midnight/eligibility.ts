@@ -7,7 +7,7 @@ export type PublicDraw = Readonly<{
   cutoffTime: bigint;
   totalShareTwab: bigint;
   expectedWinnerCount: bigint;
-  publicSupply: bigint;
+  selectionDomain: bigint;
   randomness: Hex;
 }>;
 
@@ -21,7 +21,7 @@ export function evaluateOfflineEligibility(input: {
   draw: PublicDraw;
   note: AccountNote;
   ownerSecret: Hex;
-  ticketSalt: Hex;
+  selectionSalt: Hex;
 }): OfflineEligibility {
   return {
     availableOffline: true,
@@ -31,11 +31,11 @@ export function evaluateOfflineEligibility(input: {
       cutoffTime: input.draw.cutoffTime,
       totalShareTwab: input.draw.totalShareTwab,
       expectedWinnerCount: input.draw.expectedWinnerCount,
-      publicSupply: input.draw.publicSupply,
+      selectionDomain: input.draw.selectionDomain,
       randomness: input.draw.randomness,
       drawId: input.draw.drawId,
       ownerSecret: input.ownerSecret,
-      ticketSalt: input.ticketSalt,
+      selectionSalt: input.selectionSalt,
     }),
   };
 }

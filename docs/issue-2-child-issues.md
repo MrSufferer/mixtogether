@@ -7,21 +7,22 @@ reproducible and reviewable. The native issues are attached to parent issue
 sections below remain the source body for each issue and are preserved
 verbatim.
 
-Each implementation issue is marked `ready-for-agent`; each provider,
-authority, or approval gate is marked `ready-for-human`. User stories use the
-`US-01`…`US-16` map in the parent plan.
+Each unblocked implementation issue is marked `ready-for-agent`; contract-
+dependent work is marked `needs-info` when a feasibility gate is open. Each
+provider, authority, or approval gate is marked `ready-for-human`. User
+stories use the `US-01`…`US-16` map in the parent plan.
 
 ## Native issue map
 
 | Manifest | Native issue | Status label |
 | --- | --- | --- |
-| 01 | [#3](https://github.com/MrSufferer/mixtogether/issues/3) | `ready-for-agent` |
+| 01 | [#3](https://github.com/MrSufferer/mixtogether/issues/3) | `needs-info` |
 | 02 | [#4](https://github.com/MrSufferer/mixtogether/issues/4) | `ready-for-human` |
-| 03 | [#5](https://github.com/MrSufferer/mixtogether/issues/5) | `ready-for-agent` |
-| 04 | [#6](https://github.com/MrSufferer/mixtogether/issues/6) | `ready-for-agent` |
-| 05 | [#7](https://github.com/MrSufferer/mixtogether/issues/7) | `ready-for-agent` |
-| 06 | [#8](https://github.com/MrSufferer/mixtogether/issues/8) | `ready-for-agent` |
-| 07 | [#9](https://github.com/MrSufferer/mixtogether/issues/9) | `ready-for-agent` |
+| 03 | [#5](https://github.com/MrSufferer/mixtogether/issues/5) | `needs-info` |
+| 04 | [#6](https://github.com/MrSufferer/mixtogether/issues/6) | `needs-info` |
+| 05 | [#7](https://github.com/MrSufferer/mixtogether/issues/7) | `needs-info` |
+| 06 | [#8](https://github.com/MrSufferer/mixtogether/issues/8) | `needs-info` |
+| 07 | [#9](https://github.com/MrSufferer/mixtogether/issues/9) | `needs-info` |
 | 08 | [#10](https://github.com/MrSufferer/mixtogether/issues/10) | `ready-for-agent` |
 | 09 | [#11](https://github.com/MrSufferer/mixtogether/issues/11) | `ready-for-agent` |
 | 10 | [#12](https://github.com/MrSufferer/mixtogether/issues/12) | `ready-for-agent` |
@@ -32,14 +33,14 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 | 15 | [#17](https://github.com/MrSufferer/mixtogether/issues/17) | `ready-for-agent` |
 | 16 | [#18](https://github.com/MrSufferer/mixtogether/issues/18) | `ready-for-human` |
 
-## 01 — Feasibility and safety constants (`ready-for-agent`)
+## 01 — Feasibility and safety constants (`needs-info`)
 
 - **User stories / ADRs:** US-01; ADR 0001, 0009, 0011, 0027.
 - **Dependencies:** none.
 - **Public seams:** four Compact components; generated reference runner; sanitized build profile.
 - **Tests:** Compact compile and key validation; financial/privacy/randomness/authority property matrix; deterministic reference tests.
-- **Evidence:** compiler/runtime versions, source hashes, invariant output, failed-gate report if the pinned toolchain is unavailable.
-- **Human gate:** none for the implementation; provider provisioning follows in issue 02.
+- **Evidence:** compiler/runtime versions, source hashes, invariant output, and [the failed-gate report](../midnight/feasibility-report.md).
+- **Human gate:** maintainer supplies the accepted Compact language profile before contract-dependent work resumes.
 
 ## 02 — Provider accounts and immutable deployment inputs (`ready-for-human`)
 
@@ -50,7 +51,7 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 - **Evidence:** sanitized variable-name snapshot, provider project IDs, permissions, and billing status; never values.
 - **Human gate:** maintainer creates accounts, enables MFA, funds Preprod, and enters secrets directly into provider stores.
 
-## 03 — Shielded tMIX asset and faucet (`ready-for-agent`)
+## 03 — Shielded tMIX asset and faucet (`needs-info`)
 
 - **User stories / ADRs:** US-03; ADR 0009, 0027.
 - **Dependencies:** issue 01.
@@ -59,7 +60,7 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 - **Evidence:** contract artifact hash and cap/faucet assertions.
 - **Human gate:** deployer submits the reviewed asset contract on Preprod.
 
-## 04 — Threshold randomness (`ready-for-agent`)
+## 04 — Threshold randomness (`needs-info`)
 
 - **User stories / ADRs:** US-04; ADR 0003, 0027.
 - **Dependencies:** issue 01.
@@ -68,7 +69,7 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 - **Evidence:** redacted commit/reveal receipt set and aggregate hash.
 - **Human gate:** maintainer provisions isolated GitHub, Render, and offline contributor credentials.
 
-## 05 — Yield adapter (`ready-for-agent`)
+## 05 — Yield adapter (`needs-info`)
 
 - **User stories / ADRs:** US-05; ADR 0002, 0006, 0027.
 - **Dependencies:** issues 01 and 03.
@@ -77,7 +78,7 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 - **Evidence:** checkpoint and rollover state transitions with no Principal movement.
 - **Human gate:** none beyond contract deployment.
 
-## 06 — Pool accounting (`ready-for-agent`)
+## 06 — Pool accounting (`needs-info`)
 
 - **User stories / ADRs:** US-06; ADR 0005, 0006, 0009, 0027.
 - **Dependencies:** issues 03–05.
@@ -86,7 +87,7 @@ authority, or approval gate is marked `ready-for-human`. User stories use the
 - **Evidence:** property matrix and sanitized reserve snapshots.
 - **Human gate:** independent maintainer reviews the deployed contract IDs before evidence capture.
 
-## 07 — Settlement and authorities (`ready-for-agent`)
+## 07 — Settlement and authorities (`needs-info`)
 
 - **User stories / ADRs:** US-07; ADR 0004, 0007, 0014, 0027.
 - **Dependencies:** issues 04–06.

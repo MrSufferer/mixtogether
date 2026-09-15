@@ -24,7 +24,6 @@ export class PrizePoolLedger {
   public readonly asset: TmixAssetLedger;
   public readonly yield: SimulatedYieldAdapter;
   private readonly accounts = new Map<string, AccountNote>();
-  private readonly ownerSecrets = new Map<string, { secret: Hex; salt: Hex }>();
   private readonly unclaimed = new Map<string, bigint>();
   private readonly unclaimedAssetAccounts = new Map<string, string>();
   private readonly claimed = new Set<Hex>();
@@ -65,7 +64,6 @@ export class PrizePoolLedger {
     const existing = this.accounts.get(owner);
     const note = existing ? updateAccount(existing, now, existing.principalShares + amountMicroUnits).note : createAccountNote(owner as Hex, amountMicroUnits, now, 0n, salt);
     this.accounts.set(owner, note);
-    this.ownerSecrets.set(owner, { secret: ownerSecret, salt });
     this.principalReserveMicroUnits += amountMicroUnits;
     this.assertSolvent();
     return this.accountSnapshot(owner, now);
@@ -98,7 +96,10 @@ export class PrizePoolLedger {
   }
 
   public finalizeDraw(now: bigint): PublicDrawSnapshot {
-    this.assertSubmissionOpen(now);
+    // Finalization is a permissionless settlement action and remains
+    // available after a missed deployer-removal deadline.  The deadline lock
+    // applies to new participant/randomness submissions, not safe settlement.
+    this.observeSubmissionState(now);
     this.assertNotPaused("settlement", now);
     if (this.draw.finalizedAt) throw new ParticipantError("INVALID_COMMAND", "draw has already been finalized");
     if (now < this.draw.randomness.revealCutoff) throw new ParticipantError("INVALID_COMMAND", "draw finalization is not yet permissionless");
@@ -128,7 +129,7 @@ export class PrizePoolLedger {
   }
 
   public claimPrize(ownerSecret: Hex, salt: Hex, now: bigint): bigint {
-    this.assertSubmissionOpen(now);
+    this.observeSubmissionState(now);
     this.assertNotPaused("settlement", now);
     if (!this.draw.finalizedAt || !this.draw.winningCommitment || !this.draw.winnerOwner) throw new ParticipantError("INVALID_COMMAND", "draw has not been finalized");
     if (now > this.draw.finalizedAt + BigInt(PROGRAM_CONSTANTS.claimWindowSeconds)) throw new ParticipantError("CLAIM_EXPIRED", "claim window has expired");
@@ -151,7 +152,7 @@ export class PrizePoolLedger {
   }
 
   public rolloverExpired(now: bigint): bigint {
-    this.assertSubmissionOpen(now);
+    this.observeSubmissionState(now);
     if (!this.draw.finalizedAt || now <= this.draw.finalizedAt + BigInt(PROGRAM_CONSTANTS.claimWindowSeconds)) return 0n;
     const amount = this.draw.prizeMicroUnits;
     if (this.draw.winnerOwner) {

@@ -27,13 +27,13 @@ export function boundedWinningZone(
   privateTwab: bigint,
   totalShareTwab: bigint,
   expectedWinnerCount: bigint,
-  publicSupply: bigint,
+  selectionDomain: bigint,
 ): bigint {
   for (const [name, value] of [
     ["privateTwab", privateTwab],
     ["totalShareTwab", totalShareTwab],
     ["expectedWinnerCount", expectedWinnerCount],
-    ["publicSupply", publicSupply],
+    ["selectionDomain", selectionDomain],
   ] as const) {
     if (value < 0n) throw new Error(`${name} cannot be negative`);
   }
@@ -42,18 +42,18 @@ export function boundedWinningZone(
     privateTwab === 0n ||
     totalShareTwab === 0n ||
     expectedWinnerCount === 0n ||
-    publicSupply === 0n
+    selectionDomain === 0n
   ) {
     return 0n;
   }
 
-  // The public ticket domain is the modulus used by the unbiased reduction.
+  // The public selection domain is the modulus used by the unbiased reduction.
   // Scale the account's share into that domain before flooring; omitting
-  // `publicSupply` would make a fully weighted account own only one ticket
+  // `selectionDomain` would make a fully weighted account own only one
   // whenever the domain is larger than the expected winner count.
   const quotient =
-    (privateTwab * publicSupply * expectedWinnerCount) / totalShareTwab;
-  return quotient > publicSupply ? publicSupply : quotient;
+    (privateTwab * selectionDomain * expectedWinnerCount) / totalShareTwab;
+  return quotient > selectionDomain ? selectionDomain : quotient;
 }
 
 export function unbiasedReduce(
@@ -106,7 +106,7 @@ export function privateRandomness(
   randomness: Hex,
   drawId: bigint,
   ownerSecret: Hex,
-  ticketSalt: Hex,
+  selectionSalt: Hex,
 ): bigint {
   return hashToBigInt(
     hashWords(
@@ -114,7 +114,7 @@ export function privateRandomness(
       bytes32(randomness),
       word(drawId),
       bytes32(ownerSecret),
-      bytes32(ticketSalt),
+      bytes32(selectionSalt),
     ),
   );
 }
@@ -124,30 +124,31 @@ export function evaluateWinningPredicate(input: {
   cutoffTime: bigint;
   totalShareTwab: bigint;
   expectedWinnerCount: bigint;
-  publicSupply: bigint;
+  selectionDomain: bigint;
   randomness: Hex;
   drawId: bigint;
   ownerSecret: Hex;
-  ticketSalt: Hex;
+  selectionSalt: Hex;
 }): WinningPredicate {
   const privateTwab = twabAt(input.note, input.cutoffTime);
   const winningZone = boundedWinningZone(
     privateTwab,
     input.totalShareTwab,
     input.expectedWinnerCount,
-    input.publicSupply,
+    input.selectionDomain,
   );
   const randomValue = privateRandomness(
     input.randomness,
     input.drawId,
     input.ownerSecret,
-    input.ticketSalt,
+    input.selectionSalt,
   );
-  // A zero public domain has no eligible ticket and is a valid, non-winning
+  // A zero selection domain has no eligible participant and is a valid,
+  // non-winning
   // predicate rather than an exceptional provider failure.
-  const reduction = input.publicSupply === 0n
+  const reduction = input.selectionDomain === 0n
     ? { accepted: false, reducedValue: 0n, quotient: 0n, rejectionBoundary: 0n }
-    : unbiasedReduce(randomValue, input.publicSupply);
+    : unbiasedReduce(randomValue, input.selectionDomain);
 
   return {
     privateTwab,

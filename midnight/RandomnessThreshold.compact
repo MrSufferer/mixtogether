@@ -60,11 +60,22 @@ export circuit reveal(contributor: Bytes<32>, commitment: Bytes<32>, revealValue
   revealCount = (revealCount + 1) as Uint<64>;
 }
 
-export circuit finalize(first: Bytes<32>, second: Bytes<32>, now: Uint<64>): [] {
+export circuit finalize(firstContributor: Bytes<32>, first: Bytes<32>, secondContributor: Bytes<32>, second: Bytes<32>, now: Uint<64>): [] {
   assert(!finalized, "draw already finalized");
   assert(now >= revealCutoff, "reveal deadline has not elapsed");
   assert(revealCount >= 2, "two reveals are required; no fallback");
   assert(first != second, "reveals must be unique");
+  // Contributors have a fixed canonical order.  Requiring that order makes
+  // the threshold aggregate independent of transaction ordering and prevents
+  // the same reveal set from producing multiple random values.
+  assert(
+    (firstContributor == pad(32, "github-actions") && secondContributor == pad(32, "offline-maintainer")) ||
+    (firstContributor == pad(32, "github-actions") && secondContributor == pad(32, "render")) ||
+    (firstContributor == pad(32, "offline-maintainer") && secondContributor == pad(32, "render")),
+    "contributors must be supplied in canonical order"
+  );
+  assert(commits.member(disclose(commitDigest(firstContributor, first, drawId))), "first reveal does not match its contributor commit");
+  assert(commits.member(disclose(commitDigest(secondContributor, second, drawId))), "second reveal does not match its contributor commit");
   assert(reveals.member(disclose(first)) && reveals.member(disclose(second)), "aggregate may disclose only committed reveals");
   aggregate = persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/aggregate/v1"), disclose(first), disclose(second), drawId]);
   finalized = true;

@@ -19,6 +19,9 @@ additionally requests proving-key generation. Generated artifacts are
 machine-local and must not be committed.
 
 The profile checker reports the installed compiler and remaining release gates.
-Source compilation is necessary but cannot waive provider, browser, authority,
-or production-operated evidence gates. Mainnet transactional entrypoints are
-not present in this artifact.
+The current workstation reports Compact language `0.23.0` while the accepted
+profile requires `0.5.1`; consequently `compatibilityMatch` and
+`readyForPreprod` remain false. See [the feasibility report](feasibility-report.md)
+for the reproducer. Source compilation is necessary but cannot waive provider,
+browser, authority, or production-operated evidence gates. Mainnet
+transactional entrypoints are not present in this artifact.

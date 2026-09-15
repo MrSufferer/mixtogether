@@ -8,8 +8,13 @@ export ledger assetComponent: Bytes<32>;
 export ledger randomnessComponent: Bytes<32>;
 export ledger yieldComponent: Bytes<32>;
 export ledger disclosureCohort: Uint<64>;
-export ledger principalReserve: Uint<64>;
-export ledger totalShareTwab: Uint<64>;
+// Exact aggregate values remain private ledger state.  Only the boundary
+// commitment below is exported once the Disclosure Cohort gate is met.
+ledger principalReserve: Uint<64>;
+ledger totalShareTwab: Uint<64>;
+ledger participantCommitments: Set<Bytes<32>>;
+export ledger participantCount: Uint<64>;
+export ledger aggregateDisclosure: Bytes<32>;
 export ledger drawId: Uint<64>;
 export ledger drawCutoff: Uint<64>;
 export ledger winningCommitment: Bytes<32>;
@@ -28,6 +33,8 @@ constructor(asset: Bytes<32>, randomness: Bytes<32>, yieldAdapter: Bytes<32>) {
   disclosureCohort = 5;
   principalReserve = 0;
   totalShareTwab = 0;
+  participantCount = 0;
+  aggregateDisclosure = pad(32, "");
   drawId = 1;
   drawCutoff = 900;
   winningCommitment = pad(32, "");
@@ -64,6 +71,10 @@ export circuit contribute(note: Bytes<32>, amount: Uint<64>, now: Uint<64>): [] 
   principalReserve = (principalReserve + disclose(amount)) as Uint<64>;
   totalShareTwab = (totalShareTwab + disclose(amount) * disclose(now)) as Uint<64>;
   assert(note != pad(32, ""), "private account note required");
+  if (!participantCommitments.member(disclose(note))) {
+    participantCommitments.insert(disclose(note));
+    participantCount = (participantCount + 1) as Uint<64>;
+  }
 }
 
 export circuit withdraw(amount: Uint<64>): [] {
@@ -74,14 +85,14 @@ export circuit withdraw(amount: Uint<64>): [] {
   principalReserve = (principalReserve - disclose(amount)) as Uint<64>;
 }
 
-export circuit finalize(winning: Bytes<32>, cohortSize: Uint<64>, now: Uint<64>): [] {
+export circuit finalize(winning: Bytes<32>, now: Uint<64>): [] {
   if (deployerActive && disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
-  assert(!submissionLocked, "submissions are locked pending deployer removal");
   assert(!settlementPaused, "settlement paused");
-  assert(cohortSize >= disclosureCohort, "Disclosure Cohort is not met");
+  assert(participantCount >= disclosureCohort, "Disclosure Cohort is not met");
   assert(now >= drawCutoff, "draw cutoff has not elapsed");
   assert(winning != pad(32, ""), "winning commitment required");
   winningCommitment = disclose(winning);
+  aggregateDisclosure = persistentHash<[Bytes<32>, Uint<64>, Uint<64>, Uint<64>]>([pad(32, "Shroudly/aggregate-disclosure/v1"), principalReserve, totalShareTwab, drawId]);
 }
 
 export circuit claim(secret: Bytes<32>, salt: Bytes<32>): [] {
