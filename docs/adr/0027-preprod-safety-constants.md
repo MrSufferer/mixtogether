@@ -1,6 +1,6 @@
 # ADR 0027: Freeze the Shroudly Preprod safety constants
 
-**Status:** Accepted  
+**Status:** Accepted
 **Date:** 2026-09-15
 
 ## Context
