@@ -102,8 +102,12 @@ async function listServices(key, owner) {
 }
 
 function assertMatches(service, expectedName, expectedRepository, expectedBranch) {
-  if (service.repo && service.repo !== expectedRepository) fail(`Render service ${expectedName} exists with a different repository; refusing to mutate it`);
+  if (service.repo && normalizeRepository(service.repo) !== normalizeRepository(expectedRepository)) fail(`Render service ${expectedName} exists with a different repository; refusing to mutate it`);
   if (service.branch && service.branch !== expectedBranch) fail(`Render service ${expectedName} exists on a different branch; refusing to mutate it`);
+}
+
+function normalizeRepository(value) {
+  return value.trim().replace(/\/+$/, "").replace(/\.git$/, "").toLowerCase();
 }
 
 async function waitForService(key, serviceId) {
