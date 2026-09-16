@@ -9,8 +9,14 @@ const outputArg = outputFlag >= 0 ? process.argv[outputFlag + 1] : "apps/web/pub
 if (!outputArg || outputArg.startsWith("-")) throw new Error("--out requires a file path");
 const output = resolve(root, outputArg);
 const sourceNames = ["TmixAsset", "RandomnessThreshold", "YieldAdapter", "PrizePool"];
-const artifactHashes = sourceNames.map((name) => `0x${createHash("sha256").update(readFileSync(resolve(root, "midnight", `${name}.compact`))).digest("hex")}`);
 const env = process.env;
+const sourceArtifactHashes = sourceNames.map((name) => `0x${createHash("sha256").update(readFileSync(resolve(root, "midnight", `${name}.compact`))).digest("hex")}`);
+const configuredArtifactHashValues = [env.VITE_SHROUDLY_ASSET_ARTIFACT_HASH, env.VITE_SHROUDLY_RANDOMNESS_ARTIFACT_HASH, env.VITE_SHROUDLY_YIELD_ARTIFACT_HASH, env.VITE_SHROUDLY_POOL_ARTIFACT_HASH];
+const configuredArtifactHashes = configuredArtifactHashValues.filter((value) => value !== undefined && value !== "");
+if (configuredArtifactHashes.length > 0 && (configuredArtifactHashes.length !== sourceNames.length || configuredArtifactHashes.some((value) => !/^0x[0-9a-fA-F]{64}$/.test(value)))) {
+  throw new Error("all four VITE_SHROUDLY_*_ARTIFACT_HASH values must be 0x-prefixed 32-byte hashes when configured");
+}
+const artifactHashes = configuredArtifactHashes.length === sourceNames.length ? configuredArtifactHashes : sourceArtifactHashes;
 const constants = {
   token: "tMIX",
   tokenDecimals: 6,
