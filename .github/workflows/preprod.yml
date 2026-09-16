@@ -25,7 +25,6 @@ concurrency:
 
 env:
   SHROUDLY_DEPLOYMENT_ID: ${{ vars.SHROUDLY_DEPLOYMENT_ID }}
-  SHROUDLY_AUTOMATION_ENDPOINT: ${{ vars.SHROUDLY_AUTOMATION_ENDPOINT }}
 
 jobs:
   health:
@@ -52,10 +51,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Derive and submit the isolated contributor action
         env:
-          SHROUDLY_RENDER_SEED: ${{ secrets.SHROUDLY_RENDER_SEED }}
           SHROUDLY_GITHUB_ACTIONS_SEED: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_SEED }}
-          SHROUDLY_OFFLINE_MAINTAINER_SEED: ${{ secrets.SHROUDLY_OFFLINE_MAINTAINER_SEED }}
-          SHROUDLY_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_AUTOMATION_TOKEN }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT: ${{ vars.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN }}
         run: node scripts/preprod-randomness.mjs "${{ inputs.action }}" --draw "${{ inputs.draw }}" --deployment "${{ vars.SHROUDLY_DEPLOYMENT_ID }}" --contributor github-actions --submit
 
   maintenance:
@@ -66,11 +64,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Submit an idempotent public maintenance request
         env:
-          SHROUDLY_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_AUTOMATION_TOKEN }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT: ${{ vars.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN }}
         run: |
-          test -n "$SHROUDLY_AUTOMATION_TOKEN"
-          curl --fail-with-body --silent --show-error --request POST "$SHROUDLY_AUTOMATION_ENDPOINT" \
-            --header "Authorization: Bearer $SHROUDLY_AUTOMATION_TOKEN" \
+          test -n "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT"
+          test -n "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN"
+          curl --fail-with-body --silent --show-error --request POST "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT" \
+            --header "Authorization: Bearer $SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN" \
             --header "Content-Type: application/json" \
             --data "{\"action\":\"${{ inputs.action }}\",\"deploymentId\":\"${{ vars.SHROUDLY_DEPLOYMENT_ID }}\",\"drawId\":\"${{ inputs.draw }}\"}"
 

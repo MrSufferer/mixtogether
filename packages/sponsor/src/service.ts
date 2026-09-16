@@ -1,55 +1,232 @@
-export type SponsorOperation = "add-dust" | "finalize" | "submit";
-export type SponsoredTransaction = Readonly<{ idempotencyKey: string; operation: SponsorOperation; transactionId: string; dustAdded: bigint; submitted: boolean; finalized: boolean }>;
-export type SponsorRequest = Readonly<{ idempotencyKey: string; operation: SponsorOperation; transaction: string; participantProof: string; valueBalanced: boolean; signature: string; binding: { environment: "preprod"; deploymentId: string; accountId: string }; qualificationCost: bigint }>;
-export type SponsorResult = Readonly<{ ok: true; transaction: SponsoredTransaction } | { ok: false; code: "UNAUTHORIZED" | "INVALID_TRANSACTION" | "POLICY_REJECTED" | "QUOTA_EXCEEDED" | "TIMEOUT" | "UPSTREAM_REJECTED"; message: string; retryable: boolean; fallback: "participant-funded-dust" }>;
+import { createHash, createPublicKey, verify as verifyEd25519 } from "node:crypto";
 
-export type SponsorServiceOptions = Readonly<{ timeoutMs?: number; accountQuota?: number; globalQuota?: number; maxObservedQualificationCost?: bigint; now?: () => number; authenticate?: (token: string) => Promise<{ accountId: string } | null>; submit?: (request: SponsorRequest, dustCap: bigint) => Promise<{ submitted: boolean; finalized: boolean }> }>;
+export type SponsorOperation = "add-dust" | "finalize" | "submit";
+export type SponsorBinding = Readonly<{
+  environment: "preprod";
+  networkId: "preprod";
+  deploymentId: string;
+  contractId: string;
+  circuitId: string;
+  accountId: string;
+  qualificationCost: bigint;
+  expiresAt: number;
+}>;
+export type SponsorRequest = Readonly<{
+  idempotencyKey: string;
+  operation: SponsorOperation;
+  transaction: string;
+  participantProof: string;
+  valueBalanced: boolean;
+  participantPublicKey: string;
+  signature: string;
+  binding: SponsorBinding;
+  qualificationCost: bigint;
+}>;
+export type FinalizedSponsorSubmission = Readonly<{ transactionId: string; networkFinalized: boolean; indexerVisible: boolean; ledgerConfirmed: boolean }>;
+export type SponsoredTransaction = Readonly<{ idempotencyKey: string; operation: SponsorOperation; transactionId: string; dustAdded: bigint; networkFinalized: boolean; indexerVisible: boolean; ledgerConfirmed: boolean }>;
+export type SponsorResult = Readonly<{ ok: true; transaction: SponsoredTransaction } | { ok: false; code: "UNAUTHORIZED" | "INVALID_TRANSACTION" | "INVALID_SIGNATURE" | "POLICY_REJECTED" | "QUOTA_EXCEEDED" | "TIMEOUT" | "UPSTREAM_REJECTED"; message: string; retryable: boolean; fallback: "participant-funded-dust" }>;
+
+export type SponsorServiceOptions = Readonly<{
+  timeoutMs?: number;
+  accountQuota?: number;
+  globalQuota?: number;
+  maxObservedQualificationCost?: bigint;
+  maxAuthorizationLifetimeMs?: number;
+  deploymentId?: string;
+  allowedContractIds?: readonly string[];
+  allowedCircuitIds?: readonly string[];
+  now?: () => number;
+  authenticate?: (token: string) => Promise<{ accountId: string } | null>;
+  verifySignature?: (input: { publicKey: string; signature: string; message: string }) => boolean | Promise<boolean>;
+  /**
+   * The injected adapter must submit through the provider and then observe the
+   * network finality, indexer visibility, and fresh ledger state.  A request
+   * identifier or a pair of optimistic booleans is not an acceptable receipt.
+   */
+  /**
+   * Submit through the provider and observe all three finality signals. The
+   * adapter should abort promptly, but the service still reconciles a late
+   * result because provider cancellation cannot be assumed to be atomic.
+   */
+  submit?: (request: SponsorRequest, dustCap: bigint, signal?: AbortSignal) => Promise<FinalizedSponsorSubmission>;
+}>;
 
 type Usage = { timestamps: number[] };
+type StoredTransaction = { transaction: SponsoredTransaction; authorizationDigest: string };
+type UncertainSubmission = { authorizationDigest: string };
+
+const FALLBACK = "participant-funded-dust" as const;
+const AUTHORIZATION_DOMAIN = "shroudly/sponsor-authorization/v1";
+
+/**
+ * Produce the exact participant-authorized message that the sponsor verifies.
+ * Fixed field order and length prefixes prevent ambiguous concatenation and
+ * bind every policy-sensitive value to the Ed25519 signature.
+ */
+export function sponsorAuthorizationMessage(request: SponsorRequest): string {
+  const parts = [
+    AUTHORIZATION_DOMAIN,
+    request.idempotencyKey,
+    request.operation,
+    request.transaction,
+    request.participantProof,
+    request.valueBalanced ? "true" : "false",
+    request.participantPublicKey,
+    request.binding.environment,
+    request.binding.networkId,
+    request.binding.deploymentId,
+    request.binding.contractId,
+    request.binding.circuitId,
+    request.binding.accountId,
+    request.binding.qualificationCost.toString(),
+    request.binding.expiresAt.toString(),
+    request.qualificationCost.toString(),
+  ];
+  return parts.map((part) => `${part.length}:${part}`).join("|");
+}
 
 export class SponsorService {
-  private readonly records = new Map<string, SponsoredTransaction>();
+  private readonly records = new Map<string, StoredTransaction>();
+  private readonly inFlight = new Map<string, { authorizationDigest: string; result: Promise<SponsorResult> }>();
+  private readonly uncertain = new Map<string, UncertainSubmission>();
   private readonly accountUsage = new Map<string, Usage>();
   private readonly globalUsage: number[] = [];
-  private readonly options: Required<Pick<SponsorServiceOptions, "timeoutMs" | "accountQuota" | "globalQuota" | "maxObservedQualificationCost" | "now" | "authenticate" | "submit">>;
+  private readonly options: {
+    timeoutMs: number;
+    accountQuota: number;
+    globalQuota: number;
+    maxObservedQualificationCost: bigint;
+    maxAuthorizationLifetimeMs: number;
+    deploymentId: string;
+    allowedContractIds: ReadonlySet<string>;
+    allowedCircuitIds: ReadonlySet<string>;
+    now: () => number;
+    authenticate: NonNullable<SponsorServiceOptions["authenticate"]>;
+    verifySignature: NonNullable<SponsorServiceOptions["verifySignature"]>;
+    submit: NonNullable<SponsorServiceOptions["submit"]>;
+  };
+
   public constructor(options: SponsorServiceOptions = {}) {
-    // A real Backup Account verifier and submitter must be injected by the
-    // Render deployment. Failing closed here prevents a local default from
-    // accidentally becoming a production authentication mechanism.
     const timeoutMs = options.timeoutMs ?? 8_000;
     const accountQuota = options.accountQuota ?? 20;
     const globalQuota = options.globalQuota ?? 500;
     const maxObservedQualificationCost = options.maxObservedQualificationCost ?? 100n;
-    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(accountQuota) || accountQuota <= 0 || !Number.isInteger(globalQuota) || globalQuota <= 0 || maxObservedQualificationCost < 0n) throw new Error("sponsor quotas, timeout, and DUST cost must be positive");
-    this.options = { timeoutMs, accountQuota, globalQuota, maxObservedQualificationCost, now: options.now ?? (() => Date.now()), authenticate: options.authenticate ?? (async () => null), submit: options.submit ?? (async () => ({ submitted: true, finalized: true })) };
+    const maxAuthorizationLifetimeMs = options.maxAuthorizationLifetimeMs ?? 5 * 60_000;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(accountQuota) || accountQuota <= 0 || !Number.isInteger(globalQuota) || globalQuota <= 0 || maxObservedQualificationCost < 0n || !Number.isInteger(maxAuthorizationLifetimeMs) || maxAuthorizationLifetimeMs <= 0) {
+      throw new Error("sponsor quotas, timeout, authorization lifetime, and DUST cost must be positive");
+    }
+    this.options = {
+      timeoutMs,
+      accountQuota,
+      globalQuota,
+      maxObservedQualificationCost,
+      maxAuthorizationLifetimeMs,
+      deploymentId: options.deploymentId?.trim() ?? "",
+      allowedContractIds: new Set(options.allowedContractIds ?? []),
+      allowedCircuitIds: new Set(options.allowedCircuitIds ?? []),
+      now: options.now ?? (() => Date.now()),
+      authenticate: options.authenticate ?? (async () => null),
+      verifySignature: options.verifySignature ?? verifyParticipantSignature,
+      // The HTTP entrypoint is intentionally inert until the deployment
+      // injects a provider-backed submitter.
+      submit: options.submit ?? (async () => { throw new Error("sponsor submitter is not configured"); }),
+    };
   }
+
   public dustCap(): bigint { return (this.options.maxObservedQualificationCost * 125n + 99n) / 100n; }
   public hotBalanceCap(): bigint { return this.dustCap() * BigInt(this.options.globalQuota) * 7n; }
+
   public async handle(token: string | undefined, request: unknown): Promise<SponsorResult> {
     let auth: { accountId: string } | null = null;
     try { auth = token ? await this.options.authenticate(token) : null; } catch { auth = null; }
-    if (!auth) return { ok: false, code: "UNAUTHORIZED", message: "Backup Account AAL2 authentication is required", retryable: false, fallback: "participant-funded-dust" };
-    if (!isRequest(request)) return { ok: false, code: "INVALID_TRANSACTION", message: "transaction payload is invalid", retryable: false, fallback: "participant-funded-dust" };
-    if (request.binding.accountId !== auth.accountId || request.binding.environment !== "preprod") return { ok: false, code: "POLICY_REJECTED", message: "transaction binding is invalid", retryable: false, fallback: "participant-funded-dust" };
-    const idempotencyId = `${auth.accountId}:${request.idempotencyKey}`;
-    const prior = this.records.get(idempotencyId); if (prior) return { ok: true, transaction: prior };
-    const policy = validatePolicy(request);
-    if (policy) return { ok: false, code: "POLICY_REJECTED", message: policy, retryable: false, fallback: "participant-funded-dust" };
-    if (request.qualificationCost < 0n || request.qualificationCost > this.dustCap()) return { ok: false, code: "POLICY_REJECTED", message: "qualification cost exceeds the frozen DUST cap", retryable: false, fallback: "participant-funded-dust" };
+    if (!auth) return failure("UNAUTHORIZED", "Backup Account AAL2 authentication is required", false);
+    if (!isRequest(request)) return failure("INVALID_TRANSACTION", "transaction payload is invalid", false);
+
     const now = this.options.now();
+    const policy = validatePolicy(request, auth.accountId, this.options, now);
+    if (policy) return failure("POLICY_REJECTED", policy, false);
+    if (request.qualificationCost < 0n || request.qualificationCost > this.dustCap()) return failure("POLICY_REJECTED", "qualification cost exceeds the frozen DUST cap", false);
+
+    const message = sponsorAuthorizationMessage(request);
+    let authorized = false;
+    try { authorized = await this.options.verifySignature({ publicKey: request.participantPublicKey, signature: request.signature, message }); } catch { authorized = false; }
+    if (!authorized) return failure("INVALID_SIGNATURE", "participant authorization signature is invalid", false);
+
+    const idempotencyId = `${auth.accountId}:${request.idempotencyKey}`;
+    const authorizationDigest = digest(message);
+    const prior = this.records.get(idempotencyId);
+    if (prior) {
+      if (prior.authorizationDigest !== authorizationDigest) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
+      return { ok: true, transaction: prior.transaction };
+    }
+
+    const pending = this.inFlight.get(idempotencyId);
+    if (pending) {
+      if (pending.authorizationDigest !== authorizationDigest) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
+      return pending.result;
+    }
+
+    const uncertain = this.uncertain.get(idempotencyId);
+    if (uncertain) {
+      if (uncertain.authorizationDigest !== authorizationDigest) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
+      return failure("TIMEOUT", "the sponsor submission outcome is still being reconciled; do not retry this action", false);
+    }
+
+    const result = this.submitAuthorized(request, auth.accountId, idempotencyId, authorizationDigest, now);
+    this.inFlight.set(idempotencyId, { authorizationDigest, result });
+    try { return await result; }
+    finally {
+      if (this.inFlight.get(idempotencyId)?.result === result) this.inFlight.delete(idempotencyId);
+    }
+  }
+
+  public redactedLog(result: SponsorResult): Record<string, unknown> {
+    return result.ok ? { ok: true, operation: result.transaction.operation, idempotencyKey: result.transaction.idempotencyKey, transactionId: result.transaction.transactionId } : { ok: false, code: result.code, retryable: result.retryable };
+  }
+
+  private async submitAuthorized(request: SponsorRequest, accountId: string, idempotencyId: string, authorizationDigest: string, now: number): Promise<SponsorResult> {
     this.prune(now);
-    const usage = this.accountUsage.get(auth.accountId) ?? { timestamps: [] };
-    if (usage.timestamps.length >= this.options.accountQuota || this.globalUsage.length >= this.options.globalQuota) return { ok: false, code: "QUOTA_EXCEEDED", message: "sponsorship quota is exhausted", retryable: true, fallback: "participant-funded-dust" };
-    let result: { submitted: boolean; finalized: boolean } | null;
-    try { result = await withTimeout(this.options.submit(request, this.dustCap()), this.options.timeoutMs); }
-    catch { return { ok: false, code: "UPSTREAM_REJECTED", message: "the network rejected the sponsored action", retryable: true, fallback: "participant-funded-dust" }; }
-    if (!result) return { ok: false, code: "TIMEOUT", message: "sponsor timed out after eight seconds", retryable: true, fallback: "participant-funded-dust" };
-    if (!result.submitted || !result.finalized) return { ok: false, code: "UPSTREAM_REJECTED", message: "the sponsored action did not reach finality", retryable: true, fallback: "participant-funded-dust" };
-    const transaction: SponsoredTransaction = Object.freeze({ idempotencyKey: request.idempotencyKey, operation: request.operation, transactionId: request.idempotencyKey, dustAdded: request.operation === "add-dust" ? this.dustCap() : 0n, submitted: result.submitted, finalized: result.finalized });
-    this.records.set(idempotencyId, transaction); usage.timestamps.push(now); this.accountUsage.set(auth.accountId, usage); this.globalUsage.push(now);
+    const usage = this.accountUsage.get(accountId) ?? { timestamps: [] };
+    if (usage.timestamps.length >= this.options.accountQuota || this.globalUsage.length >= this.options.globalQuota) return failure("QUOTA_EXCEEDED", "sponsorship quota is exhausted", true);
+
+    const controller = new AbortController();
+    let submission: Promise<FinalizedSponsorSubmission>;
+    try { submission = Promise.resolve(this.options.submit(request, this.dustCap(), controller.signal)); }
+    catch { return failure("UPSTREAM_REJECTED", "the network rejected the sponsored action", true); }
+
+    const result = await withTimeout(submission, this.options.timeoutMs);
+    if (!result) {
+      controller.abort();
+      this.uncertain.set(idempotencyId, { authorizationDigest });
+      void submission.then(
+        (lateResult) => {
+          if (this.uncertain.get(idempotencyId)?.authorizationDigest !== authorizationDigest) return;
+          if (!hasIndependentFinality(lateResult, request)) { this.uncertain.delete(idempotencyId); return; }
+          this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, lateResult, this.options.now());
+          this.uncertain.delete(idempotencyId);
+        },
+        () => {
+          if (this.uncertain.get(idempotencyId)?.authorizationDigest === authorizationDigest) this.uncertain.delete(idempotencyId);
+        },
+      );
+      return failure("TIMEOUT", `sponsor timed out after ${this.options.timeoutMs} milliseconds; the submission is being reconciled`, false);
+    }
+    if (!hasIndependentFinality(result, request)) return failure("UPSTREAM_REJECTED", "the sponsored action did not produce independently observed finality", true);
+
+    return this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, result, now);
+  }
+
+  private storeSuccessfulSubmission(request: SponsorRequest, accountId: string, idempotencyId: string, authorizationDigest: string, result: FinalizedSponsorSubmission, now: number): SponsorResult {
+    const transaction: SponsoredTransaction = Object.freeze({ idempotencyKey: request.idempotencyKey, operation: request.operation, transactionId: result.transactionId, dustAdded: request.operation === "add-dust" ? this.dustCap() : 0n, networkFinalized: result.networkFinalized, indexerVisible: result.indexerVisible, ledgerConfirmed: result.ledgerConfirmed });
+    this.records.set(idempotencyId, { transaction, authorizationDigest });
+    this.prune(now);
+    const currentUsage = this.accountUsage.get(accountId) ?? { timestamps: [] };
+    currentUsage.timestamps.push(now);
+    this.accountUsage.set(accountId, currentUsage);
+    this.globalUsage.push(now);
     return { ok: true, transaction };
   }
-  public redactedLog(result: SponsorResult): Record<string, unknown> { return result.ok ? { ok: true, operation: result.transaction.operation, idempotencyKey: result.transaction.idempotencyKey, transactionId: result.transaction.transactionId } : { ok: false, code: result.code, retryable: result.retryable }; }
+
   private prune(now: number): void {
     const cutoff = now - 24 * 60 * 60 * 1000;
     for (const usage of this.accountUsage.values()) usage.timestamps = usage.timestamps.filter((time) => time > cutoff);
@@ -60,21 +237,59 @@ export class SponsorService {
   }
 }
 
-function validatePolicy(request: SponsorRequest): string | null {
+function validatePolicy(request: SponsorRequest, accountId: string, options: SponsorService["options"], now: number): string | null {
   if (!request.idempotencyKey || request.idempotencyKey.length > 128) return "idempotency key is required";
-  if (!request.transaction.trim() || !request.participantProof.trim() || !request.signature.trim()) return "participant proof, signature, and transaction are required";
+  if (!request.transaction.trim() || !request.participantProof.trim() || !request.signature.trim() || !request.participantPublicKey.trim()) return "participant proof, signature, public key, and transaction are required";
   if (!request.valueBalanced) return "transaction must be value-balanced";
   if (!["add-dust", "finalize", "submit"].includes(request.operation)) return "operation is not allowlisted";
-  if (!request.binding.deploymentId.trim() || !request.binding.accountId.trim()) return "transaction binding is incomplete";
+  if (!options.deploymentId || options.allowedContractIds.size === 0 || options.allowedCircuitIds.size === 0) return "sponsor deployment policy is not configured";
+  if (request.binding.environment !== "preprod" || request.binding.networkId !== "preprod") return "transaction network binding is invalid";
+  if (request.binding.accountId !== accountId || request.binding.deploymentId !== options.deploymentId) return "transaction binding is invalid";
+  if (!options.allowedContractIds.has(request.binding.contractId) || !options.allowedCircuitIds.has(request.binding.circuitId)) return "contract or circuit is not allowlisted";
+  if (request.binding.qualificationCost !== request.qualificationCost) return "qualification cost binding is invalid";
+  if (!Number.isSafeInteger(request.binding.expiresAt) || request.binding.expiresAt <= now || request.binding.expiresAt > now + options.maxAuthorizationLifetimeMs) return "authorization lifetime is invalid or expired";
+  if (!Number.isSafeInteger(now)) return "sponsor clock is invalid";
+
   try {
     const decoded: unknown = JSON.parse(request.transaction);
-    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return "transaction is not a decodable object";
-    const action = (decoded as Record<string, unknown>).action;
-    if (action !== request.operation) return "decoded transaction action is not allowlisted";
-    if ((decoded as Record<string, unknown>).valueBalanced === false) return "transaction must be value-balanced";
+    if (!isRecord(decoded)) return "transaction is not a decodable object";
+    const expected = {
+      action: request.operation,
+      valueBalanced: true,
+      networkId: request.binding.networkId,
+      deploymentId: request.binding.deploymentId,
+      contractId: request.binding.contractId,
+      circuitId: request.binding.circuitId,
+      accountId,
+      qualificationCost: request.qualificationCost.toString(),
+      expiresAt: request.binding.expiresAt,
+    } as const;
+    for (const [key, value] of Object.entries(expected)) if (decoded[key] !== value) return `transaction ${key} binding is invalid`;
   } catch { return "transaction is not valid JSON"; }
   return null;
 }
 
-function isRequest(value: unknown): value is SponsorRequest { if (!value || typeof value !== "object") return false; const record = value as Record<string, unknown>; const binding = record.binding as Record<string, unknown> | null; return typeof record.idempotencyKey === "string" && typeof record.operation === "string" && typeof record.transaction === "string" && typeof record.participantProof === "string" && typeof record.signature === "string" && typeof record.valueBalanced === "boolean" && typeof record.qualificationCost === "bigint" && Boolean(binding) && typeof binding?.environment === "string" && typeof binding?.deploymentId === "string" && typeof binding?.accountId === "string"; }
+function isRequest(value: unknown): value is SponsorRequest {
+  if (!isRecord(value)) return false;
+  const record = value;
+  const binding = isRecord(record.binding) ? record.binding : null;
+  return typeof record.idempotencyKey === "string" && typeof record.operation === "string" && typeof record.transaction === "string" && typeof record.participantProof === "string" && typeof record.signature === "string" && typeof record.participantPublicKey === "string" && typeof record.valueBalanced === "boolean" && typeof record.qualificationCost === "bigint" && binding !== null && binding.environment === "preprod" && binding.networkId === "preprod" && typeof binding.deploymentId === "string" && typeof binding.contractId === "string" && typeof binding.circuitId === "string" && typeof binding.accountId === "string" && typeof binding.qualificationCost === "bigint" && typeof binding.expiresAt === "number";
+}
+
+function verifyParticipantSignature(input: { publicKey: string; signature: string; message: string }): boolean {
+  try {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.signature)) return false;
+    const signature = Buffer.from(input.signature, "base64");
+    if (signature.length !== 64) return false;
+    return verifyEd25519(null, Buffer.from(input.message), createPublicKey(input.publicKey), signature);
+  } catch { return false; }
+}
+
+function digest(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function failure(code: Exclude<SponsorResult, { ok: true }>["code"], message: string, retryable: boolean): SponsorResult { return { ok: false, code, message, retryable, fallback: FALLBACK }; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function hasIndependentFinality(result: unknown, request: SponsorRequest): result is FinalizedSponsorSubmission {
+  if (!isRecord(result)) return false;
+  return typeof result.transactionId === "string" && Boolean(result.transactionId.trim()) && result.transactionId !== request.idempotencyKey && result.networkFinalized === true && result.indexerVisible === true && result.ledgerConfirmed === true;
+}
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> { let timer: ReturnType<typeof setTimeout> | undefined; try { return await Promise.race([promise, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); })]); } finally { if (timer) clearTimeout(timer); } }

@@ -1,9 +1,9 @@
 import { deriveOwnerCommitment } from "./account";
-import { BackupAccountService, type BackupSession } from "./backup";
+import { UnavailableBackupAccountStore, type BackupAccountStore, type BackupSession } from "./backup";
 import { MIDNIGHT_NETWORK_CONFIG } from "./config";
 import { domain, hashWords, type Hex } from "./hashing";
 import { PrizePoolLedger } from "./pool";
-import { createRecoveryBundle, exportPrivateState, generateRecoveryKit, parseRecoveryBundle, restorePrivateState, runRecoveryReadinessCheck, serializeRecoveryBundle, type RecoveryBundle, type RecoveryKitKey } from "./recovery";
+import { createRecoveryBundle, exportPrivateState, generateRecoveryKit, parseRecoveryBundle, runRecoveryReadinessCheck, serializeRecoveryBundle, type RecoveryBundle, type RecoveryKitKey } from "./recovery";
 import type { PrivateStateBackup } from "./private-state";
 import { ParticipantError, type CommandReceipt, type ParticipantSnapshot, type SponsorshipChoice, type WalletSnapshot } from "./types";
 import { fromMicroUnits, toMicroUnits } from "./constants";
@@ -34,7 +34,7 @@ export interface ParticipantApplication {
   claimPrize(): Promise<CommandReceipt>;
   exportRecovery(): Promise<PrivateStateBackup>;
   exportRecoveryBundle(): Promise<RecoveryBundle>;
-  restoreRecovery(backup: PrivateStateBackup | RecoveryBundle | string): Promise<void>;
+  restoreRecovery(bundle: RecoveryBundle | string): Promise<void>;
   runRecoveryReadiness(): Promise<boolean>;
   writeBackup(session: BackupSession, writerId: string): Promise<bigint>;
   readBackup(session: BackupSession): Promise<unknown>;
@@ -51,6 +51,7 @@ export interface ParticipantAdapter {
   draw(): ParticipantSnapshot["draw"];
   advanceTime?(seconds: bigint): void;
   recoveryState(): unknown;
+  restoreRecoveryState(state: unknown, generation: bigint): Promise<void> | void;
 }
 
 export class ParticipantApplicationClient implements ParticipantApplication {
@@ -63,9 +64,9 @@ export class ParticipantApplicationClient implements ParticipantApplication {
   private outage: string | null = null;
   private readonly listeners = new Set<(snapshot: ParticipantSnapshot) => void>();
   private current: ParticipantSnapshot;
-  private readonly backups: BackupAccountService;
+  private readonly backups: BackupAccountStore;
 
-  public constructor(private readonly adapter: ParticipantAdapter, backups = new BackupAccountService()) {
+  public constructor(private readonly adapter: ParticipantAdapter, backups: BackupAccountStore = new UnavailableBackupAccountStore()) {
     this.backups = backups;
     this.current = this.makeSnapshot();
   }
@@ -76,9 +77,14 @@ export class ParticipantApplicationClient implements ParticipantApplication {
     this.status = "connecting"; this.emit();
     try {
       if (MIDNIGHT_NETWORK_CONFIG.network !== "preprod") throw new ParticipantError("MAINNET_DISABLED", "transactional Mainnet entrypoints are absent from this build");
+      const previousWalletId = this.wallet?.walletId ?? null;
       this.wallet = await this.adapter.connect(walletId);
+      if (previousWalletId !== this.wallet.walletId) {
+        this.recoveryKey = generateRecoveryKit();
+        this.backupGeneration = 0n;
+        this.recoveryReady = false;
+      }
       this.status = "connected";
-      this.recoveryReady = await this.runRecoveryReadiness();
       this.emit();
       return this.wallet;
     } catch (cause) {
@@ -88,7 +94,15 @@ export class ParticipantApplicationClient implements ParticipantApplication {
     }
   }
 
-  public async disconnect(): Promise<void> { await this.adapter.disconnect(); this.wallet = null; this.status = "disconnected"; this.emit(); }
+  public async disconnect(): Promise<void> {
+    await this.adapter.disconnect();
+    this.wallet = null;
+    this.recoveryKey = generateRecoveryKit();
+    this.backupGeneration = 0n;
+    this.recoveryReady = false;
+    this.status = "disconnected";
+    this.emit();
+  }
   public subscribe(listener: (snapshot: ParticipantSnapshot) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   public setSponsorship(choice: SponsorshipChoice): void { this.sponsorship = choice; this.emit(); }
 
@@ -109,14 +123,15 @@ export class ParticipantApplicationClient implements ParticipantApplication {
     return createRecoveryBundle(this.recoveryKey, backup);
   }
 
-  public async restoreRecovery(input: PrivateStateBackup | RecoveryBundle | string): Promise<void> {
+  public async restoreRecovery(input: RecoveryBundle | string): Promise<void> {
     if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a wallet before restoring recovery state");
     try {
-      const parsed = typeof input === "string" ? parseRecoveryInput(input) : input;
-      const key = isRecoveryBundle(parsed) ? parsed.key : this.recoveryKey;
-      const backup = isRecoveryBundle(parsed) ? parsed.backup : parsed;
-      await restorePrivateState({ key, backup, activeEnvironment: "preprod", activeDeploymentId: this.adapter.deploymentId });
-      this.recoveryKey = key;
+      const parsed = typeof input === "string" ? parseRecoveryBundle(input) : input;
+      const drill = await runRecoveryReadinessCheck({ key: parsed.key, backup: parsed.backup, environment: "preprod", deploymentId: this.adapter.deploymentId });
+      if (!drill.exported || !drill.restored) throw new Error("Recovery Kit export and restore drill did not complete");
+      await this.adapter.restoreRecoveryState(drill.state, drill.generation);
+      this.recoveryKey = parsed.key;
+      this.backupGeneration = drill.generation;
       this.recoveryReady = true;
       this.emit();
     }
@@ -127,14 +142,15 @@ export class ParticipantApplicationClient implements ParticipantApplication {
   }
 
   public async runRecoveryReadiness(): Promise<boolean> {
-    const drill = await runRecoveryReadinessCheck({ key: this.recoveryKey, environment: "preprod", deploymentId: this.adapter.deploymentId, state: this.adapter.recoveryState(), generation: this.backupGeneration });
-    this.recoveryReady = drill.exported && drill.restored;
-    this.emit();
+    // This is a status query only. It must never create or restore a kit on
+    // behalf of the participant, because that would turn a self-test into a
+    // false recovery guarantee.
     return this.recoveryReady;
   }
 
   public async writeBackup(session: BackupSession, writerId: string): Promise<bigint> {
     if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a wallet before backing up");
+    this.backups.handoff(session, writerId, this.backupGeneration);
     const record = await this.backups.write({ session, writerId, expectedGeneration: this.backupGeneration, key: this.recoveryKey, environment: "preprod", deploymentId: this.adapter.deploymentId, state: this.adapter.recoveryState() });
     this.backupGeneration = record.generation; this.emit(); return this.backupGeneration;
   }
@@ -175,10 +191,11 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
   // commitment separate from the wallet's public address without relying on
   // process-local randomness.
   private salt: Hex | null = null;
+  private restoredState: { state: unknown; generation: bigint } | null = null;
 
   public constructor(options: { deploymentId?: string; startTime?: bigint; pool?: PrizePoolLedger; sponsor?: SponsorExecutor } = {}) { this.deploymentId = options.deploymentId ?? "shroudly-preprod-deterministic"; this.nowSeconds = options.startTime ?? 0n; this.pool = options.pool ?? new PrizePoolLedger("preprod", this.deploymentId, this.nowSeconds); this.sponsor = options.sponsor; }
   public async connect(walletId: string): Promise<WalletSnapshot> { if (!walletId.trim()) throw new ParticipantError("UNSUPPORTED_WALLET", "a wallet id is required"); this.secret = hashWords(domain("wallet/secret/v1"), walletId); this.salt = bytes32WalletSalt(walletId); this.wallet = { walletId, address: hashWords(domain("wallet/address/v1"), walletId), network: "preprod", apiVersion: "4.0.1" }; return this.wallet; }
-  public async disconnect(): Promise<void> { this.wallet = null; this.secret = null; this.salt = null; }
+  public async disconnect(): Promise<void> { this.wallet = null; this.secret = null; this.salt = null; this.restoredState = null; }
   public currentWallet(): WalletSnapshot | null { return this.wallet; }
   public advanceTime(seconds: bigint): void { if (seconds < 0n) throw new Error("time cannot move backwards"); this.nowSeconds += seconds; }
   public seedWallet(walletId: string): void { this.pool.faucetClaim(hashWords(domain("wallet/secret/v1"), walletId), bytes32WalletSalt(walletId), this.nowSeconds); }
@@ -205,6 +222,8 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
   public account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint } { if (!this.secret || !this.salt) return { balanceMicroUnits: 0n, principalMicroUnits: 0n, twabSeconds: 0n, unclaimedPrizeMicroUnits: 0n }; const account = this.pool.account(this.secret, this.salt, this.nowSeconds); const owner = deriveOwnerCommitment(this.secret, this.salt); return { balanceMicroUnits: this.pool.asset.balanceOf(owner), principalMicroUnits: account.principalMicroUnits, twabSeconds: account.twabSeconds, unclaimedPrizeMicroUnits: this.pool.unclaimedPrize(this.secret, this.salt) }; }
   public draw(): ParticipantSnapshot["draw"] { return this.pool.snapshot(this.nowSeconds).draw; }
   public recoveryState(): unknown { return { walletId: this.wallet?.walletId ?? null, note: this.secret && this.salt ? this.pool.account(this.secret, this.salt, this.nowSeconds) : null }; }
+  public restoreRecoveryState(state: unknown, generation: bigint): void { if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "wallet is not connected"); if (!isRecordState(state) || state.walletId !== this.wallet.walletId) throw new Error("restored private state does not belong to the connected wallet"); this.restoredState = { state, generation }; }
+  public restoredRecoveryState(): unknown { return this.restoredState?.state ?? null; }
   private ensureRandomness(): void {
     const seeds: Record<string, Hex> = { render: bytes32WalletSalt("render"), "github-actions": bytes32WalletSalt("github-actions"), "offline-maintainer": bytes32WalletSalt("offline-maintainer") };
     const draw = this.pool.snapshot(this.nowSeconds).draw;
@@ -217,14 +236,7 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
 function parseAmount(amount: bigint | string): bigint { return typeof amount === "bigint" ? amount : toMicroUnits(amount); }
 function bytes32WalletSalt(walletId: string): Hex { return hashWords(domain("wallet/salt/v1"), walletId); }
 
-function isRecoveryBundle(value: PrivateStateBackup | RecoveryBundle): value is RecoveryBundle {
-  return "format" in value && value.format === "shroudly-recovery-kit";
-}
-
-function parseRecoveryInput(serialized: string): PrivateStateBackup | RecoveryBundle {
-  try { return parseRecoveryBundle(serialized); }
-  catch { return JSON.parse(serialized, (_, value) => typeof value === "string" && /^\d+n$/.test(value) ? BigInt(value.slice(0, -1)) : value) as PrivateStateBackup; }
-}
+function isRecordState(value: unknown): value is { walletId: string } { return typeof value === "object" && value !== null && typeof (value as { walletId?: unknown }).walletId === "string"; }
 
 export function createParticipantApplication(adapter: ParticipantAdapter = new DeterministicPreprodAdapter()): ParticipantApplication { return new ParticipantApplicationClient(adapter); }
 

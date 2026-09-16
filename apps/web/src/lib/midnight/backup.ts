@@ -4,8 +4,13 @@ import type { PrivateStateBackup } from "./private-state";
 
 export type BackupSession = Readonly<{ sessionId: string; email: string; aal: "aal2"; expiresAt: number }>;
 export type BackupRecord = Readonly<{ email: string; verifiedEmail: boolean; generation: bigint; activeWriter: string | null; encryptedState: PrivateStateBackup | null }>;
+export interface BackupAccountStore {
+  handoff(session: BackupSession, writerId: string, expectedGeneration: bigint): bigint;
+  write(input: { session: BackupSession; writerId: string; expectedGeneration: bigint; key: RecoveryKitKey; environment: PrivateEnvironment; deploymentId: string; state: unknown }): Promise<BackupRecord>;
+  read(input: { session: BackupSession; key: RecoveryKitKey; environment: PrivateEnvironment; deploymentId: string; retiredDeployments?: readonly string[] }): Promise<{ state: unknown; generation: bigint }>;
+}
 
-type MutableAccount = { email: string; passwordHash: string; totpSecret: string; verifiedEmail: boolean; generation: bigint; activeWriter: string | null; encryptedState: PrivateStateBackup | null };
+type MutableAccount = { email: string; passwordHash: string; totpSecret: string; verifiedEmail: boolean; generation: bigint; activeWriter: string | null; environment: PrivateEnvironment | null; deploymentId: string | null; encryptedState: PrivateStateBackup | null };
 
 function digestCredential(value: string): string {
   const encoded = new TextEncoder().encode(value);
@@ -29,7 +34,7 @@ export class BackupAccountService {
     if (password.length < 12) throw new Error("password must contain at least 12 characters");
     if (!totpSecret.trim()) throw new Error("TOTP enrollment is required");
     if (this.accounts.has(normalized)) throw new Error("backup account already exists");
-    this.accounts.set(normalized, { email: normalized, passwordHash: digestCredential(password), totpSecret, verifiedEmail: false, generation: 0n, activeWriter: null, encryptedState: null });
+    this.accounts.set(normalized, { email: normalized, passwordHash: digestCredential(password), totpSecret, verifiedEmail: false, generation: 0n, activeWriter: null, environment: null, deploymentId: null, encryptedState: null });
   }
 
   public verifyEmail(email: string): void { this.account(email).verifiedEmail = true; }
@@ -44,20 +49,34 @@ export class BackupAccountService {
     return session;
   }
 
-  public handoff(session: BackupSession, writerId: string): void {
+  public handoff(session: BackupSession, writerId: string, expectedGeneration: bigint): bigint {
     this.assertAal2(session);
     const account = this.account(session.email);
     if (!writerId.trim()) throw new Error("writer identity is required");
+    if (expectedGeneration < 0n) throw new Error("backup generation is invalid");
+    if (account.generation !== expectedGeneration) throw new Error("backup generation is stale");
     account.activeWriter = writerId;
+    return account.generation;
   }
 
   public async write(input: { session: BackupSession; writerId: string; expectedGeneration: bigint; key: RecoveryKitKey; environment: PrivateEnvironment; deploymentId: string; state: unknown }): Promise<BackupRecord> {
     this.assertAal2(input.session);
     const account = this.account(input.session.email);
+    const expectedGeneration = input.expectedGeneration;
+    if (expectedGeneration < 0n) throw new Error("backup generation is invalid");
     if (account.activeWriter !== input.writerId) throw new Error("backup writer handoff required");
-    if (account.generation !== input.expectedGeneration) throw new Error("backup generation is stale");
-    account.encryptedState = await exportPrivateState({ key: input.key, environment: input.environment, deploymentId: input.deploymentId, generation: account.generation + 1n, state: input.state });
-    account.generation += 1n;
+    if (account.generation !== expectedGeneration) throw new Error("backup generation is stale");
+    if (account.environment !== null && (account.environment !== input.environment || account.deploymentId !== input.deploymentId)) throw new Error("backup deployment binding is immutable");
+    const nextGeneration = expectedGeneration + 1n;
+    const encryptedState = await exportPrivateState({ key: input.key, environment: input.environment, deploymentId: input.deploymentId, generation: nextGeneration, state: input.state });
+    // The encryption await is intentionally before this compare-and-swap.
+    // Another writer can commit while the blob is being prepared; only the
+    // first caller whose expected generation is still current may publish it.
+    if (account.activeWriter !== input.writerId || account.generation !== expectedGeneration) throw new Error("backup generation is stale");
+    account.encryptedState = encryptedState;
+    account.generation = nextGeneration;
+    account.environment = input.environment;
+    account.deploymentId = input.deploymentId;
     return this.snapshot(account);
   }
 
@@ -68,11 +87,15 @@ export class BackupAccountService {
     return restorePrivateState({ key: input.key, backup, activeEnvironment: input.environment, activeDeploymentId: input.deploymentId, retiredDeployments: input.retiredDeployments });
   }
 
-  public delete(session: BackupSession): void {
-    this.assertAal2(session);
-    const account = this.account(session.email);
+  public async delete(input: { session: BackupSession; writerId: string; expectedGeneration: bigint }): Promise<bigint> {
+    this.assertAal2(input.session);
+    const account = this.account(input.session.email);
+    if (input.expectedGeneration < 0n) throw new Error("backup generation is invalid");
+    if (account.activeWriter !== input.writerId) throw new Error("backup writer handoff required");
+    if (account.generation !== input.expectedGeneration) throw new Error("backup generation is stale");
     account.encryptedState = null;
-    account.generation += 1n;
+    account.generation = input.expectedGeneration + 1n;
+    return account.generation;
   }
 
   /** Administrative/UI inspection still requires the same AAL2 session as a
@@ -96,6 +119,17 @@ export class BackupAccountService {
   private snapshot(account: MutableAccount): BackupRecord {
     return Object.freeze({ email: account.email, verifiedEmail: account.verifiedEmail, generation: account.generation, activeWriter: account.activeWriter, encryptedState: account.encryptedState });
   }
+}
+
+/**
+ * The browser must never silently fall back to process-local Backup Account
+ * state.  A durable Supabase implementation is injected by the deployment;
+ * until then, every remote-backup operation fails closed.
+ */
+export class UnavailableBackupAccountStore implements BackupAccountStore {
+  public handoff(): bigint { throw new Error("durable Supabase Backup Account store is not configured"); }
+  public async write(): Promise<BackupRecord> { throw new Error("durable Supabase Backup Account store is not configured"); }
+  public async read(): Promise<{ state: unknown; generation: bigint }> { throw new Error("durable Supabase Backup Account store is not configured"); }
 }
 
 function normalizeEmail(email: string): string {

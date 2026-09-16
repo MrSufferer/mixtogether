@@ -14,9 +14,21 @@ export async function handleSponsorRequest(request: Request, service = new Spons
 function normalizeJsonBody(body: unknown): unknown {
   if (!body || typeof body !== "object") return body;
   const record = body as Record<string, unknown>;
-  if (typeof record.qualificationCost === "string" && /^\d+$/.test(record.qualificationCost)) return { ...record, qualificationCost: BigInt(record.qualificationCost) };
-  if (typeof record.qualificationCost === "number" && Number.isSafeInteger(record.qualificationCost)) return { ...record, qualificationCost: BigInt(record.qualificationCost) };
-  return body;
+  const qualificationCost = toBigInt(record.qualificationCost);
+  const binding = record.binding && typeof record.binding === "object" ? record.binding as Record<string, unknown> : null;
+  const bindingQualificationCost = binding ? toBigInt(binding.qualificationCost) : null;
+  if (qualificationCost === null && bindingQualificationCost === null) return body;
+  return {
+    ...record,
+    ...(qualificationCost === null ? {} : { qualificationCost }),
+    ...(binding && bindingQualificationCost !== null ? { binding: { ...binding, qualificationCost: bindingQualificationCost } } : {}),
+  };
+}
+
+function toBigInt(value: unknown): bigint | null {
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
+  return null;
 }
 
 function json(value: unknown, status: number): Response { return new Response(JSON.stringify(value, (_, item) => typeof item === "bigint" ? item.toString() : item), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } }); }

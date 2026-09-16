@@ -39,8 +39,8 @@ stories use the `US-01`…`US-16` map in the parent plan.
 - **Dependencies:** none.
 - **Public seams:** four Compact components; generated reference runner; sanitized build profile.
 - **Tests:** Compact compile and key validation; financial/privacy/randomness/authority property matrix; deterministic reference tests.
-- **Evidence:** compiler/runtime versions, source hashes, invariant output, and [the failed-gate report](../midnight/feasibility-report.md).
-- **Human gate:** maintainer supplies the accepted Compact language profile before contract-dependent work resumes.
+- **Evidence:** compiler/runtime versions, source hashes, invariant output, and [the feasibility report](../midnight/feasibility-report.md).
+- **Human gate:** maintainer supplies the accepted Compact language profile or approves a reviewed compatibility update before contract-dependent work resumes.
 
 ## 02 — Provider accounts and immutable deployment inputs (`ready-for-human`)
 

@@ -10,7 +10,7 @@
     "pool": "unassigned"
   },
   "artifactHashes": [
-    "0x6ad7a4555566af7bf6a64f056bf5485d22f1bff586c4112a83adac2e116ce0c1",
+    "0x8f4b7e420cf9c74a4f4b45717f2f79dc82e3977f7b7c1190fb2cebfa019bff51",
     "0xf9599a3f7eadfd0a6fd7bf2528f0a4e4969710eeb45a285502153c256f966375",
     "0xd5f489081488ef6d669b2449de02cdd9dac9f264408d8ea6110f7bd5eae38caf",
     "0x2bf76bb826cfff35cfbdb59ddad6996989bdd2a88eb429603a937704b1931d26"
@@ -22,7 +22,8 @@
     "sponsor": ""
   },
   "compatibility": {
-    "compactLanguage": "0.5.1",
+    "compactCli": "0.5.2",
+    "compactLanguage": "0.23.0",
     "compactCompiler": "0.31.1",
     "compactRuntime": "0.16.0",
     "midnightJs": "4.1.1",
@@ -57,7 +58,8 @@
     "sponsorDustCap": "125% of max observed qualification cost"
   },
   "governance": "two-of-three-preprod",
+  "qualificationVerifierFingerprint": null,
   "deployerDeadlineSeconds": "86400",
   "mainnetTransactionsEnabled": false,
-  "snapshotHash": "0x0dc3184f0e10c811a971a5157f154a7379482cabb8d55b255dcdfec380effa00"
+  "snapshotHash": "0x1bb949dfcee9df76c9bfeb4e827f2fc3ee692d8b655c1bf879de700c23191fdc"
 }

@@ -47,17 +47,15 @@ export function serializePrivateStateBackup(backup: PrivateStateBackup): string 
 }
 
 export function parsePrivateStateBackup(serialized: string): PrivateStateBackup {
-  const parsed: unknown = JSON.parse(serialized);
+  const parsed: unknown = JSON.parse(serialized, (_, value) => typeof value === "string" && /^\d+n$/.test(value) ? BigInt(value.slice(0, -1)) : value);
   if (!isRecord(parsed) || parsed.format !== "shroudly-private-state-backup" || parsed.version !== 1 ||
       (parsed.environment !== "preprod" && parsed.environment !== "mainnet-test-build") ||
       typeof parsed.deploymentId !== "string" || typeof parsed.createdAt !== "string" ||
+      typeof parsed.generation !== "bigint" || parsed.generation < 0n ||
       typeof parsed.encryptedState !== "string" || !parsed.encryptedState.trim()) {
     throw new Error("invalid private-state backup");
   }
-  const generation = typeof parsed.generation === "string" && /^\d+n$/.test(parsed.generation)
-    ? BigInt(parsed.generation.slice(0, -1))
-    : typeof parsed.generation === "number" && Number.isSafeInteger(parsed.generation) ? BigInt(parsed.generation) : 0n;
-  return Object.freeze({ ...parsed, generation } as PrivateStateBackup);
+  return Object.freeze(parsed as PrivateStateBackup);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

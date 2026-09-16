@@ -8,12 +8,21 @@ test("shows the Shroudly Preprod identity and deterministic participant journey"
 
   await page.getByRole("button", { name: "Connect Lace" }).click();
   await expect(page.getByText(/preprod · API 4\.0\.1/)).toBeVisible();
-  await expect(page.getByText("Recovery Kit", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare Recovery Kit" })).toBeVisible();
 
   await page.getByRole("button", { name: "Use DUST sponsor" }).click();
   await expect(page.getByRole("status")).toContainText("DUST sponsor selected");
   await page.getByRole("button", { name: "Wallet-funded DUST" }).click();
   await expect(page.getByRole("status")).toContainText("Wallet-funded DUST selected");
+
+  await page.getByRole("button", { name: "Backup & restore" }).click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Recovery Kit" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  await page.locator('input[type="file"]').setInputFiles(downloadPath!);
+  await expect(page.getByRole("status")).toContainText("Restoring Recovery Kit confirmed");
 
   await page.getByRole("button", { name: "Claim" }).click();
   await expect(page.getByRole("status")).toContainText("confirmed");

@@ -18,10 +18,11 @@ only to the ignored `midnight/managed/` directory. `pnpm midnight:compile:keys`
 additionally requests proving-key generation. Generated artifacts are
 machine-local and must not be committed.
 
-The profile checker reports the installed compiler and remaining release gates.
-The current workstation reports Compact language `0.23.0` while the accepted
-profile requires `0.5.1`; consequently `compatibilityMatch` and
-`readyForPreprod` remain false. See [the feasibility report](feasibility-report.md)
-for the reproducer. Source compilation is necessary but cannot waive provider,
-browser, authority, or production-operated evidence gates. Mainnet
-transactional entrypoints are not present in this artifact.
+The profile checker reports the installed Compact CLI, compiler, runtime,
+language, and remaining release gates. The pinned profile is Compact CLI
+`0.5.2`, language `0.23.0`, compiler `0.31.1`, and runtime `0.16.0`; the local
+toolchain and generated artifacts match this tuple. `readyForPreprod` remains
+false until the provider, browser, authority, and production-operated evidence
+gates pass. See [the feasibility report](feasibility-report.md) for the
+reproducer. Mainnet transactional entrypoints are not present in this
+artifact.

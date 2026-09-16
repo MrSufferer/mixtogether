@@ -18,7 +18,7 @@ export type RecoveryEnvelope = Readonly<{
   ciphertext: string;
 }>;
 
-export type RecoveryDrill = Readonly<{ exported: boolean; restored: boolean; generation: bigint; checkedAt: string }>;
+export type RecoveryDrill = Readonly<{ exported: boolean; restored: boolean; generation: bigint; state: unknown; checkedAt: string }>;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -116,19 +116,25 @@ export async function exportPrivateState(input: { key: RecoveryKitKey; environme
 export async function restorePrivateState(input: { key: RecoveryKitKey; backup: PrivateStateBackup | string; activeEnvironment: PrivateEnvironment; activeDeploymentId: string; retiredDeployments?: readonly string[] }): Promise<{ state: unknown; generation: bigint }> {
   assertRecoveryKitKey(input.key);
   const backup = typeof input.backup === "string" ? parsePrivateStateBackup(input.backup) : input.backup;
+  assertGeneration(backup.generation);
   if (input.retiredDeployments?.includes(backup.deploymentId)) throw new Error("retired deployment state is read-only and cannot be imported");
   if (backup.environment !== input.activeEnvironment || backup.deploymentId !== input.activeDeploymentId) throw new Error("private state belongs to a different deployment");
   const envelope = JSON.parse(backup.encryptedState, (_, value) => typeof value === "string" && /^\d+n$/.test(value) ? BigInt(value.slice(0, -1)) : value) as RecoveryEnvelope;
+  if (!isRecoveryEnvelope(envelope) || envelope.environment !== backup.environment || envelope.deploymentId !== backup.deploymentId || envelope.generation !== backup.generation) {
+    throw new Error("private state backup generation binding is invalid");
+  }
   const state = await decryptPrivateState({ key: input.key, envelope, activeEnvironment: input.activeEnvironment, activeDeploymentId: input.activeDeploymentId });
   return { state, generation: backup.generation };
 }
 
-export async function runRecoveryReadinessCheck(input: { key?: RecoveryKitKey; environment: PrivateEnvironment; deploymentId: string; state?: unknown; generation?: bigint }): Promise<RecoveryDrill> {
-  const key = input.key ?? generateRecoveryKit();
-  const generation = input.generation ?? 0n;
-  const backup = await exportPrivateState({ key, environment: input.environment, deploymentId: input.deploymentId, generation, state: input.state ?? { probe: true } });
-  const restored = await restorePrivateState({ key, backup, activeEnvironment: input.environment, activeDeploymentId: input.deploymentId });
-  return { exported: Boolean(backup.encryptedState), restored: restored.generation === generation, generation, checkedAt: new Date().toISOString() };
+/**
+ * Verify a Recovery Kit artifact supplied by the participant.  This function
+ * deliberately does not create a key or export a probe internally: a local
+ * self-test must never qualify an account for contribution.
+ */
+export async function runRecoveryReadinessCheck(input: { key: RecoveryKitKey; backup: PrivateStateBackup; environment: PrivateEnvironment; deploymentId: string; retiredDeployments?: readonly string[] }): Promise<RecoveryDrill> {
+  const restored = await restorePrivateState({ key: input.key, backup: input.backup, activeEnvironment: input.environment, activeDeploymentId: input.deploymentId, retiredDeployments: input.retiredDeployments });
+  return { exported: Boolean(input.backup.encryptedState), restored: restored.state !== undefined && restored.generation === input.backup.generation, generation: restored.generation, state: restored.state, checkedAt: new Date().toISOString() };
 }
 
 function assertRecoveryKitKey(value: RecoveryKitKey): void {
@@ -140,7 +146,21 @@ function isPrivateStateBackup(value: unknown): value is PrivateStateBackup {
   return value.format === "shroudly-private-state-backup" && value.version === 1 &&
     (value.environment === "preprod" || value.environment === "mainnet-test-build") &&
     typeof value.deploymentId === "string" && typeof value.createdAt === "string" &&
+    typeof value.generation === "bigint" && value.generation >= 0n &&
     typeof value.encryptedState === "string" && value.encryptedState.length > 0;
+}
+
+function isRecoveryEnvelope(value: unknown): value is RecoveryEnvelope {
+  return isRecord(value) &&
+    (value.environment === "preprod" || value.environment === "mainnet-test-build") &&
+    typeof value.deploymentId === "string" && value.deploymentId.trim().length > 0 &&
+    typeof value.generation === "bigint" && value.generation >= 0n &&
+    typeof value.nonce === "string" && value.nonce.length > 0 &&
+    typeof value.ciphertext === "string" && value.ciphertext.length > 0;
+}
+
+function assertGeneration(value: unknown): asserts value is bigint {
+  if (typeof value !== "bigint" || value < 0n) throw new Error("private state backup generation is invalid");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

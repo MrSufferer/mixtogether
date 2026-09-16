@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
+const versionProfile = JSON.parse(readFileSync(resolve(root, "midnight/version-profile.json"), "utf8"));
 const outputFlag = process.argv.indexOf("--out");
 const outputArg = outputFlag >= 0 ? process.argv[outputFlag + 1] : "apps/web/public/build-profile.json";
 if (!outputArg || outputArg.startsWith("-")) throw new Error("--out requires a file path");
@@ -53,18 +54,20 @@ const profile = {
     sponsor: env.VITE_SHROUDLY_SPONSOR_URL || "",
   },
   compatibility: {
-    compactLanguage: "0.5.1",
-    compactCompiler: "0.31.1",
-    compactRuntime: "0.16.0",
-    midnightJs: "4.1.1",
-    walletSdk: "1.2.0",
-    dappConnector: "4.0.1",
-    node: "1.0.2",
-    indexer: "4.3.3-hotfix",
-    proofServer: "8.1.0",
+    compactCli: versionProfile.compactCli,
+    compactLanguage: versionProfile.compactLanguage,
+    compactCompiler: versionProfile.compactCompiler,
+    compactRuntime: versionProfile.compactRuntime,
+    midnightJs: versionProfile.midnightJs,
+    walletSdk: versionProfile.walletSdk,
+    dappConnector: versionProfile.dappConnector,
+    node: versionProfile.node,
+    indexer: versionProfile.indexer,
+    proofServer: versionProfile.proofServer,
   },
   constants,
   governance: "two-of-three-preprod",
+  qualificationVerifierFingerprint: versionProfile.qualificationVerifierFingerprint ?? null,
   deployerDeadlineSeconds: "86400",
   mainnetTransactionsEnabled: false,
 };

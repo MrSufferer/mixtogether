@@ -6,7 +6,7 @@ import { PrizePoolLedger } from "./pool";
 import type { Hex } from "./hashing";
 import { BackupAccountService, totpCode } from "./backup";
 import { exportPrivateState, generateRecoveryKit, parseRecoveryBundle, restorePrivateState, serializeRecoveryBundle, createRecoveryBundle } from "./recovery";
-import { createParticipantApplication, DeterministicPreprodAdapter } from "./application";
+import { createParticipantApplication, DeterministicPreprodAdapter, ParticipantApplicationClient } from "./application";
 import { deriveOwnerCommitment } from "./account";
 import { domain, hashWords } from "./hashing";
 import { boundedWinningZone, evaluateWinningPredicate } from "./win";
@@ -201,16 +201,64 @@ describe("Recovery Kit and Backup Account boundaries", () => {
     await expect(restorePrivateState({ key: parsed.key, backup: parsed.backup, activeEnvironment: "preprod", activeDeploymentId: "dep-a" })).resolves.toMatchObject({ state: { probe: true } });
   });
 
+  test("rejects Recovery Kit backups with missing or mismatched generations", async () => {
+    const key = generateRecoveryKit();
+    const backup = await exportPrivateState({ key, environment: "preprod", deploymentId: "dep-a", generation: 2n, state: { probe: true } });
+    const serialized = serializeRecoveryBundle(createRecoveryBundle(key, backup));
+    const missingGeneration = serialized.replace('"generation":"2n"', '"generation":null');
+    const mismatchedGeneration = serialized.replace('"generation":"2n"', '"generation":"1n"');
+    expect(() => parseRecoveryBundle(missingGeneration)).toThrow(/invalid Recovery Kit bundle/);
+    await expect(restorePrivateState({ key, backup: { ...backup, generation: 1n }, activeEnvironment: "preprod", activeDeploymentId: "dep-a" })).rejects.toThrow(/generation binding/);
+    const parsedMismatched = JSON.parse(mismatchedGeneration, (_, value) => typeof value === "string" && /^\d+n$/.test(value) ? BigInt(value.slice(0, -1)) : value);
+    await expect(restorePrivateState({ key, backup: parsedMismatched.backup, activeEnvironment: "preprod", activeDeploymentId: "dep-a" })).rejects.toThrow(/generation binding/);
+  });
+
   test("enforces verified email, AAL2, one writer and CAS generations", async () => {
     const service = new BackupAccountService();
     service.register("person@example.com", "a sufficiently long password", "totp-secret");
     service.verifyEmail("person@example.com");
     const session = service.authenticate("person@example.com", "a sufficiently long password", totpCode("totp-secret"));
-    service.handoff(session, "browser-1");
+    expect(service.handoff(session, "browser-1", 0n)).toBe(0n);
     const key = generateRecoveryKit();
     const first = await service.write({ session, writerId: "browser-1", expectedGeneration: 0n, key, environment: "preprod", deploymentId: "dep", state: { ok: true } });
     expect(first.generation).toBe(1n);
     await expect(service.write({ session, writerId: "browser-1", expectedGeneration: 0n, key, environment: "preprod", deploymentId: "dep", state: {} })).rejects.toThrow(/stale/);
+    expect(() => service.handoff(session, "browser-2", 0n)).toThrow(/stale/);
+    expect(service.handoff(session, "browser-2", 1n)).toBe(1n);
+    await expect(service.write({ session, writerId: "browser-2", expectedGeneration: 1n, key, environment: "preprod", deploymentId: "other-deployment", state: {} })).rejects.toThrow(/binding is immutable/);
+  });
+
+  test("public backup writes establish an explicit writer handoff before CAS", async () => {
+    const service = new BackupAccountService();
+    service.register("facade@example.com", "a sufficiently long password", "totp-secret");
+    service.verifyEmail("facade@example.com");
+    const session = service.authenticate("facade@example.com", "a sufficiently long password", totpCode("totp-secret"));
+    const application = new ParticipantApplicationClient(new DeterministicPreprodAdapter({ startTime: 0n }), service);
+    await application.connect("wallet-backup");
+    await expect(application.writeBackup(session, "browser-1")).resolves.toBe(1n);
+  });
+
+  test("fails closed when no durable Backup Account store is injected", async () => {
+    const application = createParticipantApplication(new DeterministicPreprodAdapter({ startTime: 0n }));
+    await application.connect("wallet-no-local-backup");
+    await expect(application.writeBackup({ sessionId: "unused", email: "person@example.com", aal: "aal2", expiresAt: Date.now() + 60_000 }, "browser-1")).rejects.toThrow(/durable Supabase/);
+  });
+
+  test("rejects a competing backup write after the first CAS commit", async () => {
+    const service = new BackupAccountService();
+    service.register("race@example.com", "a sufficiently long password", "totp-secret");
+    service.verifyEmail("race@example.com");
+    const session = service.authenticate("race@example.com", "a sufficiently long password", totpCode("totp-secret"));
+    expect(service.handoff(session, "browser-1", 0n)).toBe(0n);
+    const key = generateRecoveryKit();
+    const results = await Promise.allSettled([
+      service.write({ session, writerId: "browser-1", expectedGeneration: 0n, key, environment: "preprod", deploymentId: "dep", state: { winner: 1 } }),
+      service.write({ session, writerId: "browser-1", expectedGeneration: 0n, key, environment: "preprod", deploymentId: "dep", state: { winner: 2 } }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    await expect(service.delete({ session, writerId: "browser-1", expectedGeneration: 1n })).resolves.toBe(2n);
+    await expect(service.write({ session, writerId: "browser-1", expectedGeneration: 1n, key, environment: "preprod", deploymentId: "dep", state: {} })).rejects.toThrow(/stale/);
   });
 });
 
@@ -220,6 +268,28 @@ describe("ParticipantApplication public seam", () => {
     await expect(application.connect("wallet-test")).resolves.toMatchObject({ network: "preprod", apiVersion: "4.0.1" });
     await expect(application.faucetClaim()).resolves.toMatchObject({ status: "finalized", indexerVisible: true, ledgerConfirmed: true });
     expect(application.snapshot.privateBalanceMicroUnits).toBe(PROGRAM_CONSTANTS.faucetAmountMicroUnits);
+  });
+
+  test("requires a participant-driven Recovery Kit export and restore before contribution", async () => {
+    const adapter = new DeterministicPreprodAdapter({ startTime: 0n });
+    const application = createParticipantApplication(adapter);
+    await application.connect("wallet-recovery");
+    expect(application.snapshot.recoveryReady).toBe(false);
+    await expect(application.runRecoveryReadiness()).resolves.toBe(false);
+    await expect(application.contribute("1")).rejects.toMatchObject({ code: "RECOVERY_NOT_READY" });
+
+    const bundle = await application.exportRecoveryBundle();
+    expect(application.snapshot.recoveryReady).toBe(false);
+    await application.restoreRecovery(serializeRecoveryBundle(bundle));
+    expect(application.snapshot.recoveryReady).toBe(true);
+    expect(adapter.restoredRecoveryState()).toMatchObject({ walletId: "wallet-recovery" });
+    await expect(application.faucetClaim()).resolves.toMatchObject({ status: "finalized" });
+    await expect(application.contribute("1")).resolves.toMatchObject({ status: "finalized" });
+
+    await application.disconnect();
+    await application.connect("wallet-recovery-next");
+    expect(application.snapshot.recoveryReady).toBe(false);
+    await expect(application.contribute("1")).rejects.toMatchObject({ code: "RECOVERY_NOT_READY" });
   });
 
   test("routes an explicit sponsorship choice through the adapter and preserves a wallet fallback", async () => {

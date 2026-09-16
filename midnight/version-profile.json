@@ -1,7 +1,8 @@
 {
   "profile": "shroudly-midnight-preprod-v1",
   "status": "preprod-qualifying",
-  "compactLanguage": "0.5.1",
+  "compactCli": "0.5.2",
+  "compactLanguage": "0.23.0",
   "compactCompiler": "0.31.1",
   "compactRuntime": "0.16.0",
   "midnightJs": "4.1.1",
@@ -10,6 +11,7 @@
   "node": "1.0.2",
   "indexer": "4.3.3-hotfix",
   "proofServer": "8.1.0",
+  "qualificationVerifierFingerprint": null,
   "network": {
     "name": "preprod",
     "rpc": "https://rpc.preprod.midnight.network",

@@ -46,4 +46,10 @@ export class MidnightPreprodAdapter implements ParticipantAdapter {
   public account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint } { return { balanceMicroUnits: 0n, principalMicroUnits: 0n, twabSeconds: 0n, unclaimedPrizeMicroUnits: 0n }; }
   public draw(): ParticipantSnapshot["draw"] { const now = BigInt(Math.floor(Date.now() / 1000)); return { drawId: 0n, phase: "open", opensAt: now, closesAt: now, commitCutoff: now, revealOpensAt: now, revealClosesAt: now, eligibleCommitments: 0, disclosureCohortMet: false, prizeMicroUnits: 0n, rolloverMicroUnits: 0n, winningCommitment: ZERO_BYTES32 }; }
   public recoveryState(): unknown { return { deploymentId: this.deploymentId, walletId: this.connected?.snapshot.walletId ?? null }; }
+  public async restoreRecoveryState(state: unknown, generation: bigint): Promise<void> {
+    if (!this.connected) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a Lace wallet first");
+    const privateState = this.composition.privateState as { save?: (scope: string, value: unknown) => Promise<void> };
+    if (typeof privateState.save !== "function") throw new ParticipantError("OUTAGE", "durable Midnight private-state provider is not configured", true);
+    await privateState.save(`${this.deploymentId}:${this.connected.snapshot.walletId}`, { state, generation });
+  }
 }

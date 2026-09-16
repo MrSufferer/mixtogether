@@ -12,7 +12,8 @@ export const CONTRACT_COMPONENTS = [
 export type ContractComponent = (typeof CONTRACT_COMPONENTS)[number];
 
 export const COMPACT_PROFILE = Object.freeze({
-  language: "0.5.1",
+  compactCli: "0.5.2",
+  language: "0.23.0",
   compiler: "0.31.1",
   runtime: "0.16.0",
   midnightJs: "4.1.1",

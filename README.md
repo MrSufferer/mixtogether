@@ -20,7 +20,7 @@ Shroudly is a Midnight Preprod proving ground for a shielded `tMIX` prize pool. 
 | Full settlement pause | At most 24 hours without renewal |
 | Sponsor timeout | Eight seconds |
 
-The accepted compatibility profile is Compact language 0.5.1/compiler 0.31.1, Compact runtime 0.16.0, Midnight.js 4.1.1, Wallet SDK 1.2.0, DApp Connector 4.0.1, node 1.0.2, indexer 4.3.3-hotfix, and proof server 8.1.0. See [`midnight/version-profile.json`](midnight/version-profile.json).
+The accepted compatibility profile is Compact CLI/devtools 0.5.2, Compact language 0.23.0, compiler 0.31.1, runtime 0.16.0, Midnight.js 4.1.1, Wallet SDK 1.2.0, DApp Connector 4.0.1, node 1.0.2, indexer 4.3.3-hotfix, and proof server 8.1.0. See [`midnight/version-profile.json`](midnight/version-profile.json).
 
 ## Repository map
 
@@ -65,13 +65,14 @@ The [release runbook](docs/operations/runbook.md) starts from empty provider acc
 
 ```bash
 node scripts/preprod-health.mjs
-node scripts/preprod-randomness.mjs commit
-node scripts/preprod-randomness.mjs reveal
+# Run each command in the isolated contributor runner that owns its seed.
+node scripts/preprod-randomness.mjs commit --draw <draw-id> --deployment <deployment-id> --contributor <render|github-actions|offline-maintainer>
+node scripts/preprod-randomness.mjs reveal --draw <draw-id> --deployment <deployment-id> --contributor <render|github-actions|offline-maintainer>
 node scripts/preprod-evidence.mjs --out evidence/preprod
 node scripts/reset-preprod.mjs --deployment <deployment-id>
 ```
 
-Evidence is sanitized, hashed, and tied to the immutable source revision. A transaction is successful only after network finality, indexer visibility, and a fresh ledger-state query. Five isolated wallets and the supported Lace gate are human-operated release checks; no automated wallet bridge is bundled.
+Evidence is sanitized, hashed, and tied to the immutable source revision. A transaction is successful only after network finality, indexer visibility, and a fresh ledger-state query. Qualified evidence additionally requires an externally signed attestation from the verifier fingerprint pinned in the reviewed Compatibility Profile; a caller-supplied key alone can never qualify a bundle. Five isolated wallets and the supported Lace gate are human-operated release checks; no automated wallet bridge is bundled.
 
 Every build exposes the non-secret profile at [`/build-profile.json`](apps/web/public/build-profile.json). It includes the contract IDs, source/artifact fingerprints, endpoints, compatibility versions, fixed constants, governance/deployer status, and a SHA-256 snapshot. Provider credentials and wallet material are never emitted.
 

@@ -18,7 +18,8 @@ export const MIDNIGHT_NETWORK_CONFIG = Object.freeze({
 });
 
 export const MIDNIGHT_VERSION_PROFILE = Object.freeze({
-  compactLanguage: "0.5.1",
+  compactCli: "0.5.2",
+  compactLanguage: "0.23.0",
   compactCompiler: "0.31.1",
   compactRuntime: "0.16.0",
   midnightJs: "4.1.1",

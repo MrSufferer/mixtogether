@@ -86,8 +86,11 @@ change requires a new deployment and new evidence; do not edit a live build.
    `pnpm build`. Store the generated source hashes in the release worksheet.
 2. Apply the Supabase migration before enabling Backup Accounts. Verify RLS
    with an anonymous client, a normal authenticated client, and an AAL2 client.
-3. Compile the four Compact sources with the pinned compiler and generate ZK
-   keys in the provider's protected workspace. Deploy `TmixAsset`,
+3. In the provider's protected workspace, run the reviewed
+   `pnpm midnight:compile:keys` preflight and confirm `pnpm midnight:profile`
+   reports matching CLI/compiler/language/runtime facts, four contract
+   artifacts, and every expected prover/verifier pair. Keep generated proving
+   material in that workspace. Deploy `TmixAsset`,
    `RandomnessThreshold`, `YieldAdapter`, then `PrizePool`, pinning each
    dependency ID in the next deployment transaction.
 4. Seed the initial Prize Reserve and the one-shot isolated evidence fixture
@@ -115,6 +118,7 @@ For each transaction record only:
 
 ```json
 {
+  "kind": "contribution | draw | claim | lace-smoke",
   "transactionId": "0x…",
   "networkFinalized": true,
   "indexerVisible": true,
@@ -125,8 +129,16 @@ For each transaction record only:
 ```
 
 The evidence collector rejects a record missing any of the three confirmation
-flags. Browser artifacts are scrubbed of wallet addresses, commitments,
-nullifiers, backup identifiers, and private state before upload.
+flags. A qualified bundle contains exactly five contribution records, one
+contract-selected draw, one claim by that selected owner, and one finalized
+Lace transaction, plus at least one scrubbed browser artifact. Browser
+artifacts are scrubbed of wallet addresses, commitments, nullifiers, backup
+identifiers, and private state before upload. Qualified
+evidence also requires an external attestation signed by the verifier whose
+public-key fingerprint is pinned in the reviewed Compatibility Profile. A CLI
+flag or environment variable supplies public-key material for verification
+only; it is not a trust anchor and cannot qualify evidence when the checked-in
+fingerprint is absent.
 
 ## 6. Monitoring and incident handling
 
