@@ -277,7 +277,7 @@ say "Use the reviewed protected deployment workflow for the pinned Midnight tool
 open_url "$REPO_URL/issues/18"
 open_url "https://docs.midnight.network/relnotes/support-matrix"
 warn "The repository does not provide a human-safe one-line deployment command. Use the reviewed procedure in docs/operations/runbook.md and the protected deployment environment; do not invent a command or paste a key here."
-step "Run the reviewed preflight `pnpm midnight:compile:keys` followed by `pnpm midnight:profile`; require all four artifacts, expected prover/verifier pairs, and the approved Compatibility Profile facts to match before entering deployment."
+step 'Run the reviewed preflight `pnpm midnight:compile:keys` followed by `pnpm midnight:profile`; require all four artifacts, expected prover/verifier pairs, and the approved Compatibility Profile facts to match before entering deployment.'
 step "Deploy the four contracts, pin their dependency/artifact inputs, and seed the initial Prize Reserve plus the one-shot isolated evidence fixture through bounded circuits. Never use deployer minting for qualification."
 step "For each transaction, verify network finality, indexer visibility, and a fresh ledger read before treating it as successful."
 step "Record the immutable deployment ID, four public contract IDs, and four 0x-prefixed artifact hashes in the protected release worksheet. Stage 9 will capture only those public values for local/Vercel config."
