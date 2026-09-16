@@ -1,4 +1,4 @@
-import { RandomnessSignerService } from "./service";
+import { RandomnessSignerService } from "./service.ts";
 
 export async function handleRandomnessRequest(request: Request, service = new RandomnessSignerService({ deploymentId: "not-ready", contractId: "not-ready", contributor: "render", ingressToken: "not-ready" })): Promise<Response> {
   if (request.method !== "POST") return json({ ok: false, code: "POLICY_REJECTED", message: "POST is required", retryable: false }, 405);

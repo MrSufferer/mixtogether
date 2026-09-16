@@ -1,5 +1,5 @@
-import { SponsorService, type FinalizedSponsorSubmission, type SponsorRequest } from "./service";
-import { createSupabaseSponsorStateStore, type FetchLike as StateFetchLike } from "./state";
+import { SponsorService, type FinalizedSponsorSubmission, type SponsorRequest } from "./service.ts";
+import { createSupabaseSponsorStateStore, type FetchLike as StateFetchLike } from "./state.ts";
 
 export type SponsorRuntime = Readonly<{ service: SponsorService; ready: boolean; missing: readonly string[] }>;
 

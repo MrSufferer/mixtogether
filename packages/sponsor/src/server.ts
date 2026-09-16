@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { handleSponsorRequest } from "./http";
-import { createSponsorRuntimeFromEnvironment } from "./runtime";
+import { handleSponsorRequest } from "./http.ts";
+import { createSponsorRuntimeFromEnvironment } from "./runtime.ts";
 
 /**
  * Render HTTP entrypoint. The service is constructed only from server-side

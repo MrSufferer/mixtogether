@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { handleRandomnessRequest } from "./http";
-import { createRandomnessRuntimeFromEnvironment } from "./runtime";
+import { handleRandomnessRequest } from "./http.ts";
+import { createRandomnessRuntimeFromEnvironment } from "./runtime.ts";
 
 const runtime = createRandomnessRuntimeFromEnvironment();
 const port = Number.parseInt(process.env.PORT ?? "8787", 10);

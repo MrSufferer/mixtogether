@@ -1,4 +1,4 @@
-import { SponsorService } from "./service";
+import { SponsorService } from "./service.ts";
 
 export async function handleSponsorRequest(request: Request, service = new SponsorService()): Promise<Response> {
   if (request.method !== "POST") return json({ ok: false, code: "POLICY_REJECTED", message: "POST is required", retryable: false, fallback: "participant-funded-dust" }, 405);

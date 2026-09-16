@@ -1,4 +1,4 @@
-import { RandomnessSignerService, type FinalizedRandomnessSubmission, type RandomnessIntent } from "./service";
+import { RandomnessSignerService, type FinalizedRandomnessSubmission, type RandomnessIntent } from "./service.ts";
 
 export type RandomnessRuntime = Readonly<{ service: RandomnessSignerService; ready: boolean; missing: readonly string[] }>;
 
