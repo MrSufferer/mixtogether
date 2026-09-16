@@ -89,7 +89,9 @@ process.stdout.write(`${JSON.stringify({ ownerId, repository, branch, dryRun, se
 
 async function resolveTeamOwner(key) {
   const owners = await renderRequest(key, "/owners", { method: "GET" });
-  const team = (Array.isArray(owners) ? owners : []).find((owner) => owner?.type === "team" && typeof owner.id === "string");
+  const team = (Array.isArray(owners) ? owners : [])
+    .map((entry) => entry?.owner ?? entry)
+    .find((owner) => owner?.type === "team" && typeof owner.id === "string");
   if (!team) fail("no Render team workspace was found; set RENDER_OWNER_ID explicitly");
   return team.id;
 }
