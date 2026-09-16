@@ -1,8 +1,8 @@
-# MixTogether brand
+# Shroudly brand
 
 ## Positioning
 
-MixTogether is a private prize-savings pool: calm enough to trust with savings,
+Shroudly is a private prize-savings pool: calm enough to trust with savings,
 playful enough to make a five-minute demo memorable.
 
 - Primary tagline: **Private savings. Provable chances.**

@@ -1,4 +1,4 @@
-name: CI
+name: Shroudly CI
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,5 +24,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm check
-      - run: pnpm --filter @mixtogether/web exec playwright install --with-deps chromium
+      - run: pnpm midnight:compile
+      # The profile reports the remaining provider/key/browser gates. Those
+      # require the separately provisioned Preprod accounts and are enforced
+      # by the deployment checklist, not by an unprovisioned CI runner.
+      - run: pnpm midnight:profile
+      - run: pnpm --filter @shroudly/web exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      - name: Scan active source for retired stack and secrets
+        shell: bash
+        run: |
+          # Keep the scanner out of its own search input: the pattern names
+          # retired technologies so matching this workflow would be a false
+          # positive. The explicit roots still cover all active source,
+          # configuration, scripts, and documentation.
+          if rg -n -i 'zama|wagmi|viem|hardhat|sepolia|ethereum|fhe|mixTogether|VITE_(POOL|SEPOLIA)|CUSDC|USDC|PRIVATE_KEY|ALCHEMY|INFURA' \
+            apps packages midnight scripts docs README.md SECURITY.md .env.example package.json pnpm-workspace.yaml .github/workflows/preprod.yml \
+            --glob '!docs/legacy/**' --glob '!docs/issue-2-child-issues.md' --glob '!node_modules/**' --glob '!pnpm-lock.yaml' --glob '!output/**' --glob '!*.lock'; then
+            echo "retired stack or secret-shaped active reference found"
+            exit 1
+          fi
+      - name: Verify sanitized profile and diff hygiene
+        run: |
+          node scripts/preprod-health.mjs --offline
+          git diff --check

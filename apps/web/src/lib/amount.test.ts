@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatTokenAmount, parseTokenAmount } from "./amount";
 
 describe("token amount boundaries", () => {
-  it("parses six-decimal cUSDC without floating point", () => {
+  it("parses six-decimal tMIX without floating point", () => {
     expect(parseTokenAmount("10.123456")).toBe(10_123_456n);
     expect(parseTokenAmount("0.1")).toBe(100_000n);
   });

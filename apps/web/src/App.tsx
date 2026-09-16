@@ -1,498 +1,179 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import {
-  useApproveUnderlying,
-  useConfidentialTransferAndCall,
-  useFinalizeUnwrap,
-  useGrantPermit,
-  useUnwrap,
-  useWrap,
-} from "@zama-fhe/react-sdk";
-import { useQueryClient } from "@tanstack/react-query";
-import {
+  AlertTriangle,
   ArrowDownToLine,
-  ArrowRight,
   Check,
-  CircleDollarSign,
   Clock3,
-  Droplets,
-  Eye,
+  Download,
+  ExternalLink,
   EyeOff,
   Gift,
-  Info,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  TicketCheck,
   Trophy,
   WalletCards,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import {
-  encodeAbiParameters,
-  type Address,
-  type Hex,
-  zeroHash,
-} from "viem";
-import {
-  useAccount,
-  usePublicClient,
-  useReadContracts,
-  useSwitchChain,
-  useWriteContract,
-} from "wagmi";
-import { PrivateBalances } from "./components/PrivateBalances";
-import { WalletButton } from "./components/WalletButton";
-import { formatPublicCompact, parseTokenAmount } from "./lib/amount";
-import {
-  CHAIN_ID,
-  CUSDC_ADDRESS,
-  POOL_ADDRESS,
-  POOL_CONFIGURED,
-  USDC_ADDRESS,
-} from "./lib/config";
-import { poolAbi, tokenAbi, wrapperEventsAbi } from "./lib/contracts";
-import {
-  DRAW_PHASES,
-  HISTORY_LABEL,
-  drawActionLabel,
-  formatDuration,
-  nextDrawAction,
-  secondsUntil,
-  type DrawAction,
-} from "./lib/draw";
-import { mergePendingUnwraps, pendingUnwrapStore } from "./lib/unwrap";
-import { clearPrivateQueryCache } from "./lib/private-session";
-import { assertSuccessfulReceipt, friendlyWalletError, transactionHashOf } from "./lib/transaction";
+import { formatTokenAmount, parseTokenAmount } from "./lib/amount";
+import { MIDNIGHT_NETWORK_CONFIG, MIDNIGHT_PROVIDER_STATUS, PREPROD_DISCLOSURES } from "./lib/midnight/config";
+import { createParticipantApplication, DeterministicPreprodAdapter } from "./lib/midnight/application";
+import { MidnightPreprodAdapter } from "./lib/midnight/preprod-adapter";
+import { serializeRecoveryBundle, parseRecoveryBundle } from "./lib/midnight/recovery";
+import { PROGRAM_CONSTANTS } from "./lib/midnight/constants";
+import { nextDrawAction, formatDuration } from "./lib/draw";
+import type { ParticipantApplication } from "./lib/midnight/application";
+import type { ParticipantError } from "./lib/midnight/types";
+import "./styles.css";
 
-type DrawState = readonly [bigint, number, number, number, number, number, number, number];
-type Handles = { token?: Hex; principal?: Hex; winnings?: Hex };
-type ReceiptState = {
-  label: string;
-  status: "pending" | "confirmed" | "error";
-  hash?: Hex;
-};
-
-const DEPOSIT_DATA = encodeAbiParameters([{ type: "uint8" }], [1]);
-const FAUCET_AMOUNT = 100_000_000n;
+// Development builds use the deterministic reference adapter so every journey can
+// be exercised without a wallet. Production bundles contain only the genuine Lace
+// connector and never ship an automated wallet bridge.
+const adapter = import.meta.env.DEV ? new DeterministicPreprodAdapter() : new MidnightPreprodAdapter();
+const application: ParticipantApplication = createParticipantApplication(adapter);
 
 export default function App() {
-  const reduceMotion = useReducedMotion();
-  const queryClient = useQueryClient();
-  const account = useAccount();
-  const publicClient = usePublicClient();
-  const { switchChainAsync, isPending: switching } = useSwitchChain();
-  const { writeContractAsync } = useWriteContract();
-  const grantPermit = useGrantPermit();
-  const approve = useApproveUnderlying(CUSDC_ADDRESS);
-  const wrap = useWrap(CUSDC_ADDRESS);
-  const deposit = useConfidentialTransferAndCall({ address: CUSDC_ADDRESS });
-  const unwrap = useUnwrap(CUSDC_ADDRESS);
-  const finalizeUnwrap = useFinalizeUnwrap(CUSDC_ADDRESS);
-
+  const subscribe = useCallback((listener: (next: ParticipantApplication["snapshot"]) => void) => application.subscribe(listener), []);
+  const snapshot = useSyncExternalStore(subscribe, () => application.snapshot, () => application.snapshot);
+  const [walletId, setWalletId] = useState("evidence-wallet-1");
   const [amount, setAmount] = useState("10");
-  const [revealed, setRevealed] = useState(false);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  const [notice, setNotice] = useState("Ready when you are.");
+  const [notice, setNotice] = useState("Connect a supported Lace wallet to begin.");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [confetti, setConfetti] = useState(false);
-  const [pendingUnwraps, setPendingUnwraps] = useState<Hex[]>([]);
-  const [receiptState, setReceiptState] = useState<ReceiptState | null>(null);
-  const [retryOperation, setRetryOperation] = useState<{
-    label: string;
-    operation: () => Promise<unknown>;
-  } | null>(null);
-
-  const correctChain = account.chainId === CHAIN_ID;
-  const canTransact = Boolean(account.address && correctChain && POOL_CONFIGURED);
-
-  const reads = useReadContracts({
-    contracts: [
-      { address: POOL_ADDRESS, abi: poolAbi, functionName: "drawState" },
-      { address: USDC_ADDRESS, abi: tokenAbi, functionName: "balanceOf", args: [account.address ?? POOL_ADDRESS] },
-      { address: CUSDC_ADDRESS, abi: tokenAbi, functionName: "confidentialBalanceOf", args: [account.address ?? POOL_ADDRESS] },
-      { address: POOL_ADDRESS, abi: poolAbi, functionName: "principalOf", args: [account.address ?? POOL_ADDRESS] },
-      { address: POOL_ADDRESS, abi: poolAbi, functionName: "winningsOf", args: [account.address ?? POOL_ADDRESS] },
-    ],
-    query: {
-      enabled: Boolean(account.address && correctChain && POOL_CONFIGURED),
-      refetchInterval: 12_000,
-    },
-  });
-
-  const draw = reads.data?.[0]?.result as DrawState | undefined;
-  const publicBalance = reads.data?.[1]?.result as bigint | undefined;
-  const handles: Handles = useMemo(() => ({
-    token: reads.data?.[2]?.result as Hex | undefined,
-    principal: reads.data?.[3]?.result as Hex | undefined,
-    winnings: reads.data?.[4]?.result as Hex | undefined,
-  }), [reads.data]);
-
-  const drawId = Number(draw?.[0] ?? 1n);
-  const phase = Number(draw?.[1] ?? 0);
-  const scheduledCutoff = Number(draw?.[4] ?? 0);
-  const saverCount = Number(draw?.[7] ?? 0);
-  const remaining = scheduledCutoff ? secondsUntil(scheduledCutoff, now) : 300;
-  const action = draw ? nextDrawAction({ phase, now, scheduledCutoff }) : null;
-  const completedDraws = Array.from(
-    { length: Math.min(3, Math.max(0, drawId - 1)) },
-    (_, index) => drawId - index - 1,
-  );
+  const [backupText, setBackupText] = useState<string | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [clock, setClock] = useState(() => Date.now());
+  const localAdapter = adapter instanceof DeterministicPreprodAdapter ? adapter : null;
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now() / 1000), 1_000);
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    setRevealed(false);
-    setConfetti(false);
-    setError(null);
-    setReceiptState(null);
-    setRetryOperation(null);
-    clearPrivateQueryCache(queryClient);
-  }, [account.address, account.chainId, queryClient]);
-
-  useEffect(() => {
-    if (!account.address || !publicClient) {
-      setPendingUnwraps([]);
-      return;
-    }
-    const walletAddress = account.address;
-    let cancelled = false;
-    void (async () => {
-      const latest = await publicClient.getBlockNumber();
-      const fromBlock = latest > 100_000n ? latest - 100_000n : 0n;
-      const logs = await publicClient.getLogs({
-        address: CUSDC_ADDRESS,
-        events: wrapperEventsAbi,
-        fromBlock,
-        toBlock: "latest",
-      });
-      const requested: Hex[] = [];
-      const finalized: Hex[] = [];
-      for (const log of logs) {
-        const id = log.args.unwrapRequestId as Hex | undefined;
-        if (!id) continue;
-        if (log.args.receiver?.toLowerCase() !== walletAddress.toLowerCase()) continue;
-        if (log.eventName === "UnwrapRequested") requested.push(id);
-        if (log.eventName === "UnwrapFinalized") finalized.push(id);
-      }
-      const store = pendingUnwrapStore(window.localStorage);
-      const merged = mergePendingUnwraps(store.load(walletAddress), requested, finalized);
-      store.save(walletAddress, merged);
-      if (!cancelled) setPendingUnwraps(merged);
-    })().catch(() => {
-      const saved = pendingUnwrapStore(window.localStorage).load(walletAddress);
-      if (!cancelled) setPendingUnwraps(saved);
-    });
-    return () => { cancelled = true; };
-  }, [account.address, publicClient]);
 
   const run = useCallback(async (label: string, operation: () => Promise<unknown>) => {
     setBusy(label);
     setError(null);
     setNotice(`${label}…`);
-    setReceiptState({ label, status: "pending" });
-    setRetryOperation(null);
     try {
-      const result = await operation();
-      setReceiptState({
-        label,
-        status: "confirmed",
-        hash: transactionHashOf(result),
-      });
-      setNotice(`${label} confirmed.`);
-      await reads.refetch();
+      await operation();
+      setNotice(`${label} confirmed after finality, indexer visibility, and a fresh ledger query.`);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "The wallet operation failed.";
-      setError(friendlyWalletError(message));
-      setReceiptState({
-        label,
-        status: "error",
-        hash: transactionHashOf(cause),
-      });
-      setRetryOperation({ label, operation });
-      setNotice("Nothing changed.");
+      const typed = cause as Partial<ParticipantError>;
+      const message = cause instanceof Error ? cause.message : "The participant action failed.";
+      setError(typed.code ? `${typed.code}: ${message}` : message);
+      setNotice("No success was fabricated; resolve the displayed condition and retry.");
     } finally {
       setBusy(null);
     }
-  }, [reads]);
-
-  async function parsedAmount() {
-    return parseTokenAmount(amount);
-  }
-
-  function faucet() {
-    if (!account.address) return;
-    void run("Minting 100 mock USDC", async () => {
-      const hash = await writeContractAsync({
-        address: USDC_ADDRESS,
-        abi: tokenAbi,
-        functionName: "mint",
-        args: [account.address!, FAUCET_AMOUNT],
-        chainId: CHAIN_ID,
-      });
-      const receipt = await publicClient?.waitForTransactionReceipt({ hash });
-      assertSuccessfulReceipt(receipt);
-      return receipt ?? hash;
-    });
-  }
-
-  function approveExact() {
-    void run("Approving the exact public amount", async () => {
-      return approve.mutateAsync({ amount: await parsedAmount() });
-    });
-  }
-
-  function shield() {
-    void run("Shielding into cUSDC", async () => {
-      return wrap.mutateAsync({ amount: await parsedAmount() });
-    });
-  }
-
-  function savePrivately() {
-    void run("Adding private savings", async () => {
-      const result = await deposit.mutateAsync({
-        to: POOL_ADDRESS,
-        amount: await parsedAmount(),
-        data: DEPOSIT_DATA,
-      });
-      setRevealed(false);
-      return result;
-    });
-  }
-
-  function poolWrite(functionName: DrawAction | "withdrawAll" | "claimWinnings") {
-    void run(drawActionLabel[functionName as DrawAction] ?? humanize(functionName), async () => {
-      const hash = await writeContractAsync({
-        address: POOL_ADDRESS,
-        abi: poolAbi,
-        functionName,
-        chainId: CHAIN_ID,
-      });
-      const receipt = await publicClient?.waitForTransactionReceipt({ hash });
-      assertSuccessfulReceipt(receipt);
-      setRevealed(false);
-      return receipt ?? hash;
-    });
-  }
-
-  function reveal() {
-    void run("Authorizing private reveal", async () => {
-      const result = await grantPermit.mutateAsync([CUSDC_ADDRESS, POOL_ADDRESS]);
-      setRevealed(true);
-      return result;
-    });
-  }
-
-  function requestUnwrap() {
-    if (!account.address) return;
-    void run("Requesting public cash-out", async () => {
-      const result = await unwrap.mutateAsync({ amount: await parsedAmount() });
-      const updated = mergePendingUnwraps(pendingUnwraps, [result.unwrapRequestId], []);
-      pendingUnwrapStore(window.localStorage).save(account.address!, updated);
-      setPendingUnwraps(updated);
-      setRevealed(false);
-      return result;
-    });
-  }
-
-  function finalize(id: Hex) {
-    if (!account.address) return;
-    void run("Finalizing public cash-out", async () => {
-      const result = await finalizeUnwrap.mutateAsync({ unwrapRequestId: id });
-      const updated = pendingUnwraps.filter((value) => value !== id);
-      pendingUnwrapStore(window.localStorage).save(account.address!, updated);
-      setPendingUnwraps(updated);
-      return result;
-    });
-  }
-
-  const celebrate = useCallback(() => {
-    setConfetti(true);
-    window.setTimeout(() => setConfetti(false), 2_800);
   }, []);
 
+  const connect = () => void run("Connecting", () => application.connect(walletId));
+  const disconnect = () => void run("Disconnecting", () => application.disconnect());
+  const contribute = () => {
+    let parsed: bigint;
+    try { parsed = parseTokenAmount(amount); } catch (cause) { setError(cause instanceof Error ? cause.message : "Enter a valid tMIX amount."); return; }
+    void run("Contributing", () => application.contribute(parsed));
+  };
+  const withdraw = () => {
+    let parsed: bigint;
+    try { parsed = parseTokenAmount(amount); } catch (cause) { setError(cause instanceof Error ? cause.message : "Enter a valid tMIX amount."); return; }
+    void run("Withdrawing", () => application.withdraw(parsed));
+  };
+
+  const connected = snapshot.connection === "connected";
+  const stateReady = connected && snapshot.stateStatus === "available";
+  const action = stateReady ? nextDrawAction({ phase: snapshot.draw.phase, now: BigInt(Math.floor(clock / 1_000)), revealClosesAt: snapshot.draw.revealClosesAt, hasPrize: snapshot.unclaimedPrizeMicroUnits > 0n }) : null;
+  const timeLeft = snapshot.draw.revealClosesAt > 0n ? snapshot.draw.revealClosesAt - BigInt(Math.floor(clock / 1_000)) : 0n;
+  const formattedTime = formatDuration(timeLeft > 0n ? timeLeft : 0n);
+
+  const exportRecovery = async () => {
+    await run("Exporting Recovery Kit", async () => {
+      const bundle = await application.exportRecoveryBundle();
+      const serialized = serializeRecoveryBundle(bundle);
+      setBackupText(serialized);
+      download("shroudly-recovery-kit.json", serialized, "application/json");
+    });
+  };
+
+  const restoreRecovery = async (file: File | undefined) => {
+    if (!file) return;
+    await run("Restoring Recovery Kit", async () => application.restoreRecovery(parseRecoveryBundle(await file.text())));
+  };
+
+  const resetArchive = () => {
+    window.localStorage.setItem(`shroudly-reset-${MIDNIGHT_NETWORK_CONFIG.deploymentId}`, new Date().toISOString());
+    setNotice("Local archive invalidated for this deployment. Connect again to start a new participant session.");
+  };
+
+  const busyNow = busy !== null;
+  const networkLabel = `${snapshot.deployment.environment} · ${snapshot.deployment.deploymentId}`;
+
   return (
-    <main className="app-shell">
-      <TicketMotes reduced={Boolean(reduceMotion)} />
+    <div className="app-shell">
+      <div className="motes" aria-hidden>{Array.from({ length: 14 }, (_, i) => <i key={i} style={{ "--i": i } as CSSProperties} />)}</div>
       <header className="site-header">
-        <a className="wordmark" href="#top" aria-label="MixTogether home">
-          <span className="mark"><Droplets size={17} /></span>
-          MixTogether
-        </a>
+        <a className="wordmark" href="#top" aria-label="Shroudly home"><span className="mark"><ShieldCheck size={18} /></span>Shroudly</a>
         <div className="header-actions">
-          <span className="network-pill"><i /> Sepolia</span>
-          <WalletButton />
+          <span className="header-separator" aria-hidden="true">·</span>
+          <span className="network-pill"><i /> Preprod only</span>
+          {connected ? <button className="wallet-control" onClick={disconnect}><span>{short(snapshot.wallet?.address ?? "")}</span><span aria-hidden>×</span></button> : <button className="connect-button" onClick={connect} disabled={busyNow}><WalletCards size={16} /> {busy === "Connecting" ? "Connecting…" : "Connect Lace"}</button>}
         </div>
       </header>
 
-      <section className="hero" id="top">
-        <motion.div
-          className="hero-copy"
-          initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <p className="eyebrow"><ShieldCheck size={16} /> Confidential prize savings</p>
-          <h1>Private savings.<br /><em>Provable chances.</em></h1>
-          <p className="lede">Save together. Win in secret. Your principal stays withdrawable while encrypted time-weighted chances choose one saver each draw.</p>
-          <div className="trust-row">
-            <span><LockKeyhole size={15} /> FHE encrypted</span>
-            <span><ShieldCheck size={15} /> No-loss principal</span>
-            <span><RefreshCw size={15} /> Permissionless draws</span>
+      <main id="top">
+        <section className="hero">
+          <div className="hero-copy">
+            <p className="eyebrow"><Sparkles size={13} /> Private savings, public fairness</p>
+            <h1>Save privately.<br /><em>Draw fairly.</em></h1>
+            <p className="lede">Shroudly is a shielded Preprod proving ground for private time-weighted balances and threshold-selected prizes. Every displayed tMIX amount is valueless test currency.</p>
+            <div className="trust-row"><span><LockKeyhole size={14} /> Private balances</span><span><Check size={14} /> Deterministic selection</span><span><EyeOff size={14} /> Selective disclosure</span></div>
           </div>
-        </motion.div>
-        <PrizeOrb drawId={drawId} phase={phase} reduced={Boolean(reduceMotion)} />
-      </section>
+          <div className="orb-stage" aria-label="Current prize reserve"><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Trophy size={28} /><span>Prize reserve</span><strong>{stateReady ? formatTokenAmount(snapshot.draw.prizeMicroUnits) : "—"}</strong><small>tMIX</small></div><p><i /> {stateReady ? `simulated yield · ${(PROGRAM_CONSTANTS.simulatedYieldPerDrawMicroUnits / 1_000_000n).toString()} tMIX / draw` : "verified ledger state unavailable"}</p></div>
+        </section>
 
-      {!POOL_CONFIGURED && (
-        <div className="deployment-banner" role="status">
-          <Info size={17} />
-          <span>Contract preview mode. Set <code>VITE_POOL_ADDRESS</code> after Sepolia deployment to enable transactions.</span>
-        </div>
-      )}
-      {account.isConnected && !correctChain && (
-        <div className="wrong-network" role="alert">
-          MixTogether only supports Sepolia.
-          <button onClick={() => void switchChainAsync({ chainId: CHAIN_ID })} disabled={switching}>Switch network</button>
-        </div>
-      )}
+        <div className="deployment-banner"><ShieldCheck size={16} /> <span><strong>{PREPROD_DISCLOSURES.identity}</strong> · {networkLabel} · Mainnet transactions are absent from this build.</span></div>
+        <div className="deployment-banner"><AlertTriangle size={16} /> <span>{PREPROD_DISCLOSURES.trust} {PREPROD_DISCLOSURES.governance} {PREPROD_DISCLOSURES.deployer}</span></div>
 
-      <section className="dashboard" aria-label="Savings dashboard">
-        <motion.article className="panel savings-panel" initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
-          <div className="panel-heading">
-            <div><p className="kicker">Your position</p><h2>Private balance room</h2></div>
-            <LockKeyhole className="panel-icon" aria-hidden />
-          </div>
-
-          {!account.isConnected ? (
-            <div className="empty-state"><WalletCards /><h3>Connect to enter the pool</h3><p>Balances stay hidden until you explicitly sign a private reveal.</p></div>
-          ) : revealed ? (
-            <>
-              <PrivateBalances handles={handles} tokenAddress={CUSDC_ADDRESS} poolAddress={POOL_ADDRESS} onPositivePrize={celebrate} />
-              <button className="text-button" onClick={() => setRevealed(false)}><LockKeyhole size={15} /> Hide private balances</button>
-            </>
-          ) : (
-            <button className="reveal-card" onClick={reveal} disabled={!canTransact || Boolean(busy)}>
-              <span className="reveal-icon"><Eye /></span>
-              <span><strong>Reveal my private balances</strong><small>One EIP-712 signature decrypts wallet cUSDC, principal, and winnings together.</small></span>
-              <ArrowRight />
-            </button>
-          )}
-
-          <div className="amount-control">
-            <label htmlFor="amount">Amount</label>
-            <div className="amount-input"><input id="amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} aria-describedby="amount-help" /><span>USDC</span></div>
-            <p id="amount-help">Six decimals maximum. Shield and unshield amounts are public.</p>
+        <section className="dashboard">
+          <div className="panel savings-panel">
+            <div className="panel-heading"><div><p className="kicker">Participant journey</p><h2>Your private position</h2></div><LockKeyhole className="panel-icon" /></div>
+            {!connected ? <div className="empty-state"><WalletCards size={27} /><h3>Connect a supported wallet</h3><p>Use the qualified desktop Chrome/Lace profile. The app never exposes raw provider objects to React.</p><button className="primary-button" onClick={connect} disabled={busyNow}>Connect to Preprod</button></div> : <>
+              {stateReady ? <div className="balance-grid" aria-live="polite"><Balance label="Private wallet" value={snapshot.privateBalanceMicroUnits} /><Balance label="Time-Weighted Principal" value={snapshot.principalMicroUnits} /><Balance label="Unclaimed prize" value={snapshot.unclaimedPrizeMicroUnits} prize /><p className="privacy-note"><EyeOff size={14} /> Private state is encrypted locally.</p></div> : <div className="data-unavailable" role="status"><AlertTriangle size={20} /><div><strong>Verified ledger state unavailable</strong><p>{snapshot.stateMessage ?? "The application is waiting for a genuine Preprod state reader."}</p></div></div>}
+              <div className="amount-control"><label htmlFor="amount">Amount (1–1,000 tMIX)</label><div className="amount-input"><input id="amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" /><span>tMIX</span></div><p>Six-decimal integer accounting · Disclosure Cohort requires five wallets.</p></div>
+              <div className="sponsorship-choice" aria-label="Transaction fee choice">
+                <div><strong>Transaction fees</strong><p>Choose how DUST is supplied for eligible actions.</p></div>
+                <div className="sponsorship-options" role="group" aria-label="DUST sponsorship">
+                  <button className={snapshot.sponsorship === "sponsored" ? "selected" : ""} onClick={() => { application.setSponsorship("sponsored"); setNotice("DUST sponsor selected. A rejection leaves this action available with wallet-funded DUST; an unresolved timeout must reconcile first."); }} disabled={busyNow}>Use DUST sponsor</button>
+                  <button className={snapshot.sponsorship === "participant-funded" ? "selected" : ""} onClick={() => { application.setSponsorship("participant-funded"); setNotice("Wallet-funded DUST selected; the participant signs and submits directly."); }} disabled={busyNow}>Wallet-funded DUST</button>
+                </div>
+                <small>A rejected sponsorship can fall back to wallet-funded DUST. If the sponsor times out before its provider result is known, wait for reconciliation before retrying the same action.</small>
+              </div>
+              <div className="journey">
+                <JourneyStep number="01" icon={<Gift size={18} />} title="Claim faucet allocation" detail="1,000 tMIX per 24-hour epoch" action="Claim" onClick={() => void run("Faucet claim", () => application.faucetClaim())} disabled={busyNow || !stateReady} />
+                <JourneyStep number="02" icon={<ArrowDownToLine size={18} />} title="Contribute to the pool" detail={snapshot.recoveryReady ? "Principal custody and TWAB start immediately" : "Export and restore your Recovery Kit first"} action="Contribute" onClick={contribute} disabled={busyNow || !stateReady || !snapshot.recoveryReady} />
+                <JourneyStep number="03" icon={<RefreshCw size={18} />} title="Withdraw principal" detail="Partial or full withdrawal, no prize reserve mixing" action="Withdraw" onClick={withdraw} disabled={busyNow || !stateReady || snapshot.principalMicroUnits === 0n} />
+              </div>
+              <div className="secondary-actions"><button onClick={() => void run("Yield checkpoint", () => application.checkpointYield())} disabled={busyNow || !stateReady}>Checkpoint yield</button><button onClick={() => setShowRecovery(true)} disabled={busyNow || snapshot.recoveryReady}>{snapshot.recoveryReady ? "Recovery Kit ready" : "Prepare Recovery Kit"}</button><button onClick={() => setShowRecovery((value) => !value)}>{showRecovery ? "Hide backup" : "Backup & restore"}</button><button onClick={resetArchive}>Reset archive</button></div>
+              {showRecovery && <div className="backup-box"><p><strong>Recovery Kit</strong> is a participant-held export. It binds encrypted state to {snapshot.deployment.deploymentId}; export and restore it before your first contribution. Retired deployments are read-only and cannot be imported.</p><button className="soft-button" onClick={() => void exportRecovery()} disabled={busyNow}><Download size={14} /> Export Recovery Kit</button><label className="soft-button file-button">Restore Recovery Kit<input type="file" accept="application/json" onChange={(event) => void restoreRecovery(event.target.files?.[0])} /></label>{backupText && <small>Recovery Kit staged for download. Restore that file to enable contribution.</small>}</div>}
+            </>}
           </div>
 
-          <div className="journey" aria-label="Deposit steps">
-            <JourneyStep number="1" title="Faucet" detail={publicBalance === undefined ? "Get mock USDC" : `${formatPublicCompact(publicBalance)} public USDC`} action="Mint 100" onClick={faucet} disabled={!account.isConnected || !correctChain || Boolean(busy)} icon={<CircleDollarSign />} />
-            <JourneyStep number="2" title="Approve" detail="Exact amount only" action="Approve" onClick={approveExact} disabled={!canTransact || Boolean(busy)} icon={<Check />} />
-            <JourneyStep number="3" title="Shield" detail="Public → private" action="Shield" onClick={shield} disabled={!canTransact || Boolean(busy)} icon={<ShieldCheck />} />
-            <JourneyStep number="4" title="Save" detail="Private transfer" action="Deposit" onClick={savePrivately} disabled={!canTransact || Boolean(busy) || phase !== 0 || remaining === 0} icon={<ArrowDownToLine />} primary />
-          </div>
+          <aside className="side-column">
+            <div className="panel draw-panel"><div className="panel-heading"><div><p className="kicker">{stateReady ? `Threshold draw #${snapshot.draw.drawId.toString()}` : "Verified state unavailable"}</p><h2>{!stateReady ? "Awaiting verified state" : snapshot.draw.phase === "finalized" ? "Winner selected" : "Next draw"}</h2></div><Clock3 className="panel-icon" /></div><div className="phase-track"><Phase label="Open" active={stateReady && snapshot.draw.phase === "open"} /><Phase label="Commit" active={stateReady && snapshot.draw.eligibleCommitments > 0} /><Phase label="Reveal" active={stateReady && snapshot.draw.revealClosesAt > 0n && snapshot.draw.phase !== "finalized"} /><Phase label="Finalized" active={stateReady && snapshot.draw.phase === "finalized"} /></div><div className="timer-row"><div><span>{stateReady ? snapshot.draw.phase === "finalized" ? "Claim window" : "Reveal deadline" : "Ledger state"}</span><strong>{stateReady ? formattedTime : "—"}</strong></div><Clock3 size={19} /></div><p className="draw-hint">{stateReady ? `2-of-3 canonical reveals · no fallback randomness · ${snapshot.draw.disclosureCohortMet ? "cohort met" : "cohort pending"}` : snapshot.stateMessage ?? "Connect to a configured Preprod deployment to read draw state."}</p>{action === "finalizeDraw" && <button className="primary-button full" onClick={() => void run("Finalize draw", () => application.finalizeDraw())} disabled={busyNow}>Finalize permissionlessly</button>}{action === "claimPrize" && <button className="primary-button full" onClick={() => void run("Claim prize", () => application.claimPrize())} disabled={busyNow}>Claim private prize</button>}<button className="soft-button full" onClick={() => localAdapter?.advanceTime(900n)} disabled={!localAdapter || !stateReady}>Advance deterministic clock 15m</button></div>
+            <div className="panel panel-midnight"><div className="panel-heading"><div><p className="kicker">Provider boundary</p><h2>Midnight profile</h2></div><ShieldCheck className="panel-icon" /></div><p className="midnight-copy">Official wallet, proof, public-data, private-state, ZK-config, and logging providers are composed behind one deep module.</p><div className="provider-status-grid">{MIDNIGHT_PROVIDER_STATUS.map(([name, status]) => <span key={name}><small>{name}</small><strong>{status}</strong></span>)}</div></div>
+          </aside>
+        </section>
 
-          <div className="secondary-actions">
-            <button onClick={() => poolWrite("withdrawAll")} disabled={!canTransact || Boolean(busy)}>Withdraw all principal</button>
-            <button onClick={() => poolWrite("claimWinnings")} disabled={!canTransact || Boolean(busy)}>Claim private winnings</button>
-            <button onClick={requestUnwrap} disabled={!canTransact || Boolean(busy)}>Request public cash-out</button>
-          </div>
-
-          {pendingUnwraps.length > 0 && (
-            <div className="pending-list">
-              <p><Clock3 size={15} /> Pending public cash-out</p>
-              {pendingUnwraps.map((id) => <button key={id} onClick={() => finalize(id)} disabled={Boolean(busy)}>Finalize {shortId(id)}</button>)}
-            </div>
-          )}
-        </motion.article>
-
-        <motion.aside className="side-column" initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <article className="panel draw-panel">
-            <div className="panel-heading"><div><p className="kicker">Draw #{drawId}</p><h2>{DRAW_PHASES[phase] ?? "Loading"}</h2></div><TicketCheck className="panel-icon" /></div>
-            <div className="phase-track" aria-label={`Draw phase: ${DRAW_PHASES[phase] ?? "loading"}`}>
-              {DRAW_PHASES.map((name, index) => <div key={name} className={index <= phase ? "phase active" : "phase"}><span>{index < phase ? <Check /> : index + 1}</span><small>{name}</small></div>)}
-            </div>
-            <div className="timer-row"><div><span>{phase === 0 ? "Saving closes in" : "Draw processing"}</span><strong>{phase === 0 ? formatDuration(remaining) : `${Math.max(Number(draw?.[5] ?? 0), Number(draw?.[6] ?? 0))}/64 slots`}</strong></div><Clock3 /></div>
-            {action ? (
-              <button className="primary-button full" onClick={() => poolWrite(action)} disabled={!canTransact || Boolean(busy)}><RefreshCw size={17} /> {drawActionLabel[action]}</button>
-            ) : (
-              <p className="draw-hint">Anyone can advance the draw when this phase is ready.</p>
-            )}
-          </article>
-
-          <article className="panel pool-panel">
-            <div className="pool-visual" style={{ "--pool-fill": `${Math.max(8, saverCount / 64 * 100)}%` } as React.CSSProperties}><span className="wave" /><Gift /></div>
-            <div className="pool-copy"><p className="kicker">Shared pool</p><h2>{saverCount} / 64 savers</h2><p>Exact pool size, weights, odds, ticket, reserve, and selected interval stay encrypted.</p></div>
-          </article>
-
-          <article className="privacy-card">
-            <Trophy />
-            <div><strong>Nominal prize: up to 10 cUSDC.</strong><p>Actual award depends on the private reserve and may be lower, including zero. Saver principal never funds prizes.</p></div>
-          </article>
-
-          <article className="panel history-panel" aria-label="Recent draw history">
-            <div className="panel-heading"><div><p className="kicker">Recent draws</p><h2>Private results</h2></div><EyeOff className="panel-icon" /></div>
-            {completedDraws.length > 0 ? (
-              <ol>{completedDraws.map((id) => <li key={id}><span>Draw #{id}</span><strong>{HISTORY_LABEL}</strong></li>)}</ol>
-            ) : (
-              <p className="history-empty">Completed draws will appear here without exposing private outcomes.</p>
-            )}
-          </article>
-        </motion.aside>
-      </section>
-
-      <div className={error ? "status-bar error" : "status-bar"} role={error ? "alert" : "status"}>
-        <span>{busy ? <span className="spinner" /> : error ? "!" : <Sparkles size={15} />}</span>
-        <div className="status-copy">
-          <strong>{error ?? notice}</strong>
-          {receiptState?.hash && (
-            <a href={`https://sepolia.etherscan.io/tx/${receiptState.hash}`} target="_blank" rel="noreferrer">
-              {receiptState.status === "error" ? "View failed receipt" : "View confirmed receipt"} <ArrowRight size={13} />
-            </a>
-          )}
-        </div>
-        {receiptState?.status === "error" && retryOperation && (
-          <button onClick={() => void run(retryOperation.label, retryOperation.operation)}>Retry</button>
-        )}
-      </div>
-
-      <section className="disclosure">
-        <LockKeyhole />
-        <div><h2>Private amounts, public participation.</h2><p>Wallet addresses, registry membership, transaction timing, shield/unshield amounts, and claim or withdrawal calls remain public. A zero-value encrypted claim is valid, so claiming does not prove a win. MixTogether does not provide wallet anonymity.</p></div>
-      </section>
-
-      <footer><span>MixTogether</span><p>Experimental Sepolia software. Not audited. Mock assets have no monetary value.</p><a href="https://docs.zama.org/protocol" target="_blank" rel="noreferrer">Powered by Zama FHE <ArrowRight size={14} /></a></footer>
-
-      <AnimatePresence>{confetti && <Confetti reduced={Boolean(reduceMotion)} />}</AnimatePresence>
-    </main>
+        <section className="disclosure"><AlertTriangle size={22} /><div><h2>Know the test boundaries</h2><p>{PREPROD_DISCLOSURES.cohort} {PREPROD_DISCLOSURES.yield} {PREPROD_DISCLOSURES.token} Same-maintainer thresholds are visible so a successful draw is evidence of protocol behavior, not a Mainnet trust claim.</p></div></section>
+      </main>
+      <div className={error ? "status-bar error" : "status-bar"} role="status"><span>{error ? <AlertTriangle size={15} /> : <Check size={15} />}</span><div className="status-copy"><strong>{error ?? notice}</strong>{snapshot.wallet && <small>{snapshot.wallet.network} · API {snapshot.wallet.apiVersion} · sponsorship: {snapshot.sponsorship}</small>}</div>{error && <button onClick={() => setError(null)}>Dismiss</button>}</div>
+      <footer><span>Shroudly</span><p>Preprod / mainnet-test-build · qualified desktop Chrome/Lace profile</p><a href="https://docs.midnight.network" target="_blank" rel="noreferrer">Midnight docs <ExternalLink size={12} /></a></footer>
+    </div>
   );
 }
 
-function JourneyStep({ number, title, detail, action, onClick, disabled, icon, primary = false }: { number: string; title: string; detail: string; action: string; onClick: () => void; disabled: boolean; icon: React.ReactNode; primary?: boolean }) {
-  return <div className="journey-step"><span className="step-number">{number}</span><span className="step-icon">{icon}</span><span className="step-copy"><strong>{title}</strong><small>{detail}</small></span><button className={primary ? "primary-button" : "soft-button"} onClick={onClick} disabled={disabled}>{action}</button></div>;
-}
-
-function PrizeOrb({ drawId, phase, reduced }: { drawId: number; phase: number; reduced: boolean }) {
-  return <motion.div className="orb-stage" initial={reduced ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.14, duration: 0.7 }}><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Sparkles /><span>Nominal prize</span><strong>10</strong><small>cUSDC</small></div><p><i /> Draw #{drawId} · {DRAW_PHASES[phase] ?? "Loading"}</p></motion.div>;
-}
-
-function TicketMotes({ reduced }: { reduced: boolean }) {
-  if (reduced) return null;
-  return <div className="motes" aria-hidden>{Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--i": index } as React.CSSProperties} />)}</div>;
-}
-
-function Confetti({ reduced }: { reduced: boolean }) {
-  return <motion.div className="confetti" aria-hidden initial={{ opacity: 1 }} exit={{ opacity: 0 }}>{Array.from({ length: reduced ? 0 : 20 }, (_, index) => <i key={index} style={{ "--i": index } as React.CSSProperties} />)}</motion.div>;
-}
-
-function humanize(value: string) {
-  return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function shortId(value: Hex) {
-  return value === zeroHash ? "unknown" : `${value.slice(0, 8)}…${value.slice(-4)}`;
-}
+function Balance({ label, value, prize = false }: { label: string; value: bigint; prize?: boolean }) { return <div className={prize ? "balance-item prize" : "balance-item"}><span>{label}</span><strong>{prize && <Trophy size={17} />} {formatTokenAmount(value)} <small>tMIX</small></strong></div>; }
+function JourneyStep({ number, icon, title, detail, action, onClick, disabled }: { number: string; icon: ReactNode; title: string; detail: string; action: string; onClick: () => void; disabled?: boolean }) { return <div className="journey-step"><span className="step-number">{number}</span><span className="step-icon">{icon}</span><span className="step-copy"><strong>{title}</strong><small>{detail}</small></span><button className="soft-button" onClick={onClick} disabled={disabled}>{action}</button></div>; }
+function Phase({ label, active }: { label: string; active: boolean }) { return <div className={active ? "phase active" : "phase"}><span>{active ? <Check size={11} /> : "·"}</span><small>{label}</small></div>; }
+function short(value: string): string { return value.length > 12 ? `${value.slice(0, 7)}…${value.slice(-4)}` : value; }
+function download(name: string, content: string, type: string): void { const link = document.createElement("a"); const url = URL.createObjectURL(new Blob([content], { type })); link.href = url; link.download = name; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1_000); }

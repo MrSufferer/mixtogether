@@ -1,0 +1,111 @@
+pragma language_version >= 0.22 && <= 0.23;
+
+import CompactStandardLibrary;
+
+// Three registered Preprod contributors; aggregate disclosure is threshold-only.
+export ledger drawId: Uint<64>;
+export ledger commitCutoff: Uint<64>;
+export ledger revealOpensAt: Uint<64>;
+export ledger revealCutoff: Uint<64>;
+export ledger commitCount: Uint<64>;
+export ledger revealCount: Uint<64>;
+export ledger commits: Set<Bytes<32>>;
+export ledger committedContributors: Set<Bytes<32>>;
+export ledger reveals: Set<Bytes<32>>;
+export ledger revealedContributors: Set<Bytes<32>>;
+export ledger aggregate: Bytes<32>;
+export ledger finalized: Boolean;
+export ledger renderAuthority: Bytes<32>;
+export ledger githubActionsAuthority: Bytes<32>;
+export ledger offlineMaintainerAuthority: Bytes<32>;
+
+witness render_secret(): Bytes<32>;
+witness github_actions_secret(): Bytes<32>;
+witness offline_maintainer_secret(): Bytes<32>;
+
+constructor() {
+  drawId = 1;
+  commitCutoff = 180;
+  revealOpensAt = 181;
+  revealCutoff = 480;
+  commitCount = 0;
+  revealCount = 0;
+  aggregate = pad(32, "");
+  finalized = false;
+  renderAuthority = disclose(authorityCommitment(render_secret()));
+  githubActionsAuthority = disclose(authorityCommitment(github_actions_secret()));
+  offlineMaintainerAuthority = disclose(authorityCommitment(offline_maintainer_secret()));
+}
+
+export pure circuit authorityCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/randomness-authority/v1"), secret]);
+}
+
+export pure circuit deriveReveal(seed: Bytes<32>, environment: Bytes<32>, deployment: Bytes<32>, draw: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/reveal/v1"), seed, environment, deployment, draw]);
+}
+
+export pure circuit commitDigest(contributor: Bytes<32>, reveal: Bytes<32>, draw: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/commit/v1"), contributor, reveal, draw]);
+}
+
+export circuit commit(contributor: Bytes<32>, commitment: Bytes<32>, now: Uint<64>): [] {
+  assert(!finalized, "draw already finalized");
+  assert(contributor == pad(32, "render") || contributor == pad(32, "github-actions") || contributor == pad(32, "offline-maintainer"), "unregistered randomness contributor");
+  const renderAuthorized = disclose(contributor == pad(32, "render")) && authorityCommitment(render_secret()) == renderAuthority;
+  const githubAuthorized = disclose(contributor == pad(32, "github-actions")) && authorityCommitment(github_actions_secret()) == githubActionsAuthority;
+  const offlineAuthorized = disclose(contributor == pad(32, "offline-maintainer")) && authorityCommitment(offline_maintainer_secret()) == offlineMaintainerAuthority;
+  assert(disclose(renderAuthorized || githubAuthorized || offlineAuthorized), "randomness contributor is not authenticated");
+  assert(now <= commitCutoff, "commit deadline passed");
+  assert(commitCount < 3, "three commits already registered");
+  assert(commitment != pad(32, ""), "randomness commitment is required");
+  assert(!committedContributors.member(disclose(contributor)), "contributor already committed");
+  assert(!commits.member(disclose(commitment)), "duplicate commit");
+  committedContributors.insert(disclose(contributor));
+  commits.insert(disclose(commitment));
+  commitCount = (commitCount + 1) as Uint<64>;
+}
+
+export circuit reveal(contributor: Bytes<32>, commitment: Bytes<32>, revealValue: Bytes<32>, now: Uint<64>): [] {
+  assert(!finalized, "draw already finalized");
+  const renderAuthorized = disclose(contributor == pad(32, "render")) && authorityCommitment(render_secret()) == renderAuthority;
+  const githubAuthorized = disclose(contributor == pad(32, "github-actions")) && authorityCommitment(github_actions_secret()) == githubActionsAuthority;
+  const offlineAuthorized = disclose(contributor == pad(32, "offline-maintainer")) && authorityCommitment(offline_maintainer_secret()) == offlineMaintainerAuthority;
+  assert(disclose(renderAuthorized || githubAuthorized || offlineAuthorized), "randomness contributor is not authenticated");
+  assert(disclose(now) >= revealOpensAt && disclose(now) <= revealCutoff, "reveal outside fixed phase");
+  assert(commits.member(disclose(commitment)), "missing commit");
+  assert(committedContributors.member(disclose(contributor)), "contributor has no commit");
+  assert(!revealedContributors.member(disclose(contributor)), "contributor already revealed");
+  assert(!reveals.member(disclose(revealValue)), "duplicate reveal");
+  assert(revealValue != pad(32, ""), "randomness reveal is required");
+  assert(commitment == commitDigest(contributor, revealValue, drawId), "reveal does not match commit");
+  revealedContributors.insert(disclose(contributor));
+  reveals.insert(disclose(revealValue));
+  revealCount = (revealCount + 1) as Uint<64>;
+}
+
+export circuit finalize(firstContributor: Bytes<32>, first: Bytes<32>, secondContributor: Bytes<32>, second: Bytes<32>, now: Uint<64>): [] {
+  assert(!finalized, "draw already finalized");
+  assert(now >= revealCutoff, "reveal deadline has not elapsed");
+  assert(revealCount >= 2, "two reveals are required; no fallback");
+  assert(revealCount <= 3, "reveal count exceeds the registered contributor set");
+  assert(first != second, "reveals must be unique");
+  // Contributors have a fixed canonical order.  Requiring that order makes
+  // the threshold aggregate independent of transaction ordering and prevents
+  // the same reveal set from producing multiple random values.
+  assert(
+    (firstContributor == pad(32, "github-actions") && secondContributor == pad(32, "offline-maintainer")) ||
+    (firstContributor == pad(32, "github-actions") && secondContributor == pad(32, "render")) ||
+    (firstContributor == pad(32, "offline-maintainer") && secondContributor == pad(32, "render")),
+    "contributors must be supplied in canonical order"
+  );
+  if (revealCount == 3) {
+    assert(firstContributor == pad(32, "github-actions") && secondContributor == pad(32, "offline-maintainer"), "three reveals use the canonical threshold pair");
+  }
+  assert(revealedContributors.member(disclose(firstContributor)) && revealedContributors.member(disclose(secondContributor)), "contributors must have revealed");
+  assert(commits.member(disclose(commitDigest(firstContributor, first, drawId))), "first reveal does not match its contributor commit");
+  assert(commits.member(disclose(commitDigest(secondContributor, second, drawId))), "second reveal does not match its contributor commit");
+  assert(reveals.member(disclose(first)) && reveals.member(disclose(second)), "aggregate may disclose only committed reveals");
+  aggregate = persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/aggregate/v1"), disclose(first), disclose(second), drawId]);
+  finalized = true;
+}

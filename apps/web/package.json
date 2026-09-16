@@ -1,11 +1,12 @@
 {
-  "name": "@mixtogether/web",
+  "name": "@shroudly/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node ../../scripts/generate-build-profile.mjs --out apps/web/public/build-profile.json && tsc -b && vite build",
+    "build:production": "node ../../scripts/generate-build-profile.mjs --production --out apps/web/public/build-profile.json && tsc -b && vite build",
     "lint": "tsc -b",
     "typecheck": "tsc -b",
     "test": "vitest run",
@@ -13,18 +14,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@tanstack/react-query": "5.102.8",
-    "@zama-fhe/react-sdk": "3.5.1",
-    "@zama-fhe/sdk": "3.5.1",
-    "class-variance-authority": "0.7.1",
-    "clsx": "2.1.1",
     "lucide-react": "0.577.0",
-    "motion": "12.35.2",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "tailwind-merge": "3.5.0",
-    "viem": "2.56.3",
-    "wagmi": "3.7.7"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2",

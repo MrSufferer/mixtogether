@@ -1,0 +1,94 @@
+name: Shroudly Preprod operations
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Idempotent operation to run"
+        required: true
+        default: health
+        type: choice
+        options: [health, commit, reveal, checkpoint, finalize, evidence]
+      draw:
+        description: "Draw ID for randomness operations"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shroudly-preprod-operations
+  cancel-in-progress: false
+
+env:
+  SHROUDLY_DEPLOYMENT_ID: ${{ vars.SHROUDLY_DEPLOYMENT_ID }}
+
+jobs:
+  health:
+    if: github.event_name == 'schedule' || inputs.action == 'health'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 8.15.9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Check endpoints and heartbeat
+        env:
+          BETTER_STACK_HEARTBEAT_URL: ${{ secrets.BETTER_STACK_HEARTBEAT_URL }}
+        run: node scripts/preprod-health.mjs
+
+  randomness:
+    if: github.event_name == 'workflow_dispatch' && (inputs.action == 'commit' || inputs.action == 'reveal')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derive and submit the isolated contributor action
+        env:
+          SHROUDLY_GITHUB_ACTIONS_SEED: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_SEED }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT: ${{ vars.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN }}
+        run: node scripts/preprod-randomness.mjs "${{ inputs.action }}" --draw "${{ inputs.draw }}" --deployment "${{ vars.SHROUDLY_DEPLOYMENT_ID }}" --contributor github-actions --submit
+
+  maintenance:
+    if: github.event_name == 'workflow_dispatch' && (inputs.action == 'checkpoint' || inputs.action == 'finalize')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit an idempotent public maintenance request
+        env:
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT: ${{ vars.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT }}
+          SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN: ${{ secrets.SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN }}
+        run: |
+          test -n "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT"
+          test -n "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN"
+          curl --fail-with-body --silent --show-error --request POST "$SHROUDLY_GITHUB_ACTIONS_AUTOMATION_ENDPOINT" \
+            --header "Authorization: Bearer $SHROUDLY_GITHUB_ACTIONS_AUTOMATION_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "{\"action\":\"${{ inputs.action }}\",\"deploymentId\":\"${{ vars.SHROUDLY_DEPLOYMENT_ID }}\",\"drawId\":\"${{ inputs.draw }}\"}"
+
+  evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'evidence'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 8.15.9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/preprod-evidence.mjs --out evidence/preprod
+      - run: node scripts/verify-evidence.mjs --dir evidence/preprod
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shroudly-preprod-evidence-${{ github.sha }}
+          path: evidence/preprod
+          retention-days: 90

@@ -1,0 +1,103 @@
+pragma language_version >= 0.22 && <= 0.23;
+
+import CompactStandardLibrary;
+
+// Shroudly compatibility profile: Compact CLI 0.5.2 / language 0.23.0 / compiler 0.31.1.
+// The reference asset is shielded and valueless. Every issuance path shares one cap.
+export ledger totalIssued: Uint<64>;
+export ledger cap: Uint<64>;
+export ledger faucetEpoch: Uint<64>;
+export ledger reserveSeeded: Boolean;
+export ledger automationIssued: Boolean;
+export ledger faucetNullifiers: Set<Bytes<32>>;
+export ledger custodyCommitments: Set<Bytes<32>>;
+// Authority commitments are initialized from private deployment witnesses.
+// A prover-controlled public key is never accepted as an identity by itself.
+export ledger faucetAuthority: Bytes<32>;
+export ledger reserveAuthority: Bytes<32>;
+export ledger automationAuthority: Bytes<32>;
+
+witness local_secret_key(): Bytes<32>;
+// This authority is separate from the deployer and may only seed the initial
+// Prize Reserve once. The pool address is supplied by the reviewed deployment
+// transaction, so the resulting shielded coin is held by the deployed pool.
+witness reserve_secret(): Bytes<32>;
+witness automation_secret(): Bytes<32>;
+witness participant_secret(): Bytes<32>;
+witness participant_public_key(): ZswapCoinPublicKey;
+witness automation_public_key(): ZswapCoinPublicKey;
+
+constructor() {
+  totalIssued = 0;
+  cap = 10000000000000;
+  faucetEpoch = 0;
+  reserveSeeded = false;
+  automationIssued = false;
+  custodyCommitments.insert(disclose(pad(32, "prize-reserve")));
+  faucetAuthority = disclose(authorityCommitment(local_secret_key()));
+  reserveAuthority = disclose(authorityCommitment(reserve_secret()));
+  automationAuthority = disclose(authorityCommitment(automation_secret()));
+}
+
+export pure circuit authorityCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/authority/v1"), secret]);
+}
+
+export pure circuit participantCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/faucet-owner/v1"), secret]);
+}
+
+// The token color is derived by the Compact runtime from this domain and the
+// deployed asset contract address. Consumers bind that immutable color into
+// PrizePool at deployment and reject every other shielded color.
+export pure circuit tokenDomain(): Bytes<32> {
+  return pad(32, "Shroudly/tMIX/v1");
+}
+
+export pure circuit faucetNullifier(owner: Bytes<32>, epoch: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/faucet/v1"), owner, epoch]);
+}
+
+// The initial reserve is real shielded tMIX owned by PrizePool, not a ledger
+// counter. Keeping this as a one-shot, separately witnessed circuit prevents
+// deployer code from silently minting the reserve after deployment.
+export circuit seedPrizeReserve(pool: ContractAddress): [] {
+  const caller = authorityCommitment(reserve_secret());
+  assert(disclose(caller == reserveAuthority), "reserve authority is not authenticated");
+  assert(!reserveSeeded, "prize reserve already seeded");
+  assert(totalIssued + 1000000000000 <= cap, "tMIX supply cap exceeded");
+  mintShieldedToken(tokenDomain(), 1000000000000, disclose(pad(32, "prize-reserve-seed")), right<ZswapCoinPublicKey, ContractAddress>(disclose(pool)));
+  totalIssued = (totalIssued + 1000000000000) as Uint<64>;
+  reserveSeeded = true;
+  custodyCommitments.insert(disclose(pad(32, "prize-reserve")));
+}
+
+export circuit claimFaucet(owner: Bytes<32>, epoch: Uint<64>): [] {
+  const caller = authorityCommitment(local_secret_key());
+  const participant = participantCommitment(participant_secret());
+  assert(disclose(caller == faucetAuthority), "faucet authority is not authenticated");
+  assert(reserveSeeded, "initial prize reserve must be seeded first");
+  assert(disclose(owner == participant), "faucet owner proof failed");
+  const claim = faucetNullifier(owner, epoch);
+  assert(epoch >= faucetEpoch, "faucet epochs cannot move backwards");
+  assert(!faucetNullifiers.member(disclose(claim)), "faucet epoch already claimed");
+  assert(totalIssued + 1000000000 <= cap, "tMIX supply cap exceeded");
+  faucetNullifiers.insert(disclose(claim));
+  custodyCommitments.insert(disclose(owner));
+  mintShieldedToken(tokenDomain(), 1000000000, disclose(claim), left<ZswapCoinPublicKey, ContractAddress>(disclose(participant_public_key())));
+  totalIssued = (totalIssued + 1000000000) as Uint<64>;
+  faucetEpoch = disclose(epoch);
+}
+
+export circuit allocateAutomation(fixture: Bytes<32>): [] {
+  const caller = authorityCommitment(automation_secret());
+  assert(disclose(caller == automationAuthority), "automation authority is not authenticated");
+  assert(reserveSeeded, "initial prize reserve must be seeded first");
+  assert(!automationIssued, "automation allocation already issued");
+  assert(fixture == pad(32, "evidence-fixture"), "automation allocation is isolated");
+  assert(totalIssued + 25000000000 <= cap, "tMIX supply cap exceeded");
+  automationIssued = true;
+  mintShieldedToken(tokenDomain(), 25000000000, disclose(fixture), left<ZswapCoinPublicKey, ContractAddress>(disclose(automation_public_key())));
+  totalIssued = (totalIssued + 25000000000) as Uint<64>;
+  custodyCommitments.insert(disclose(fixture));
+}
