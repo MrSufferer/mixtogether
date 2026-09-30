@@ -1,0 +1,65 @@
+{
+  "product": "Shroudly",
+  "environment": "preprod",
+  "networkId": "preprod",
+  "deploymentId": "shroudly-preprod-unassigned",
+  "contractIds": {
+    "asset": "unassigned",
+    "randomness": "unassigned",
+    "yield": "unassigned",
+    "pool": "unassigned"
+  },
+  "artifactHashes": [
+    "0x071fe4bc77dc16f881afc1f63b40f2649928b3850f82ef5d7a9657069ac9efff",
+    "0xff501486966ebe91d4ff0acc947f948900d8783846efdfae22303a8224e0abcd",
+    "0x37a10d11ce3338d2d26b16361353c73922ca8d4ea357358868c483635cb238db",
+    "0x455bce5a14fa9a3c9a009b9ea77a6ab3c12253794cd9631700cab2773612c882"
+  ],
+  "endpoints": {
+    "rpc": "https://rpc.preprod.midnight.network",
+    "indexer": "https://indexer.preprod.midnight.network/api/v4/graphql",
+    "zkConfig": "",
+    "sponsor": ""
+  },
+  "compatibility": {
+    "compactCli": "0.5.2",
+    "compactLanguage": "0.23.0",
+    "compactCompiler": "0.31.1",
+    "compactRuntime": "0.16.0",
+    "midnightJs": "4.1.1",
+    "walletSdk": "1.2.0",
+    "dappConnector": "4.0.1",
+    "node": "1.0.2",
+    "indexer": "4.3.3-hotfix",
+    "proofServer": "8.1.0"
+  },
+  "constants": {
+    "token": "tMIX",
+    "tokenDecimals": 6,
+    "supplyCapMicroUnits": "10000000000000",
+    "faucetAmountMicroUnits": "1000000000",
+    "faucetEpochSeconds": "86400",
+    "automationAllocationMicroUnits": "25000000000",
+    "initialPrizeReserveMicroUnits": "1000000000000",
+    "simulatedYieldPerDrawMicroUnits": "100000000",
+    "simulatedYieldIntervalSeconds": "900",
+    "contributionMinMicroUnits": "1000000",
+    "contributionMaxMicroUnits": "1000000000",
+    "prizeReplenishmentMaxMicroUnits": "1000000000000",
+    "prizeReplenishmentTimelockSeconds": "3600",
+    "disclosureCohort": 5,
+    "randomnessContributors": 3,
+    "randomnessThreshold": 2,
+    "claimWindowSeconds": "3600",
+    "fullSettlementPauseMaxSeconds": "86400",
+    "sponsorTimeoutMilliseconds": 8000,
+    "sponsoredActionsPerAccountPer24h": 20,
+    "sponsoredActionsGlobalPerUtcDay": 500,
+    "sponsorDustCap": "125% of max observed qualification cost"
+  },
+  "governance": "two-of-three-preprod",
+  "qualificationVerifierFingerprint": null,
+  "deployerDeadlineSeconds": "86400",
+  "mainnetTransactionsEnabled": false,
+  "snapshotHash": "0xbc20844db76884026c8c071a5b66df9502c4c168668d470128ed342e1a238c7c"
+}
