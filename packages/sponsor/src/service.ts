@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, verify as verifyEd25519 } from "node:crypto";
+import type { SponsorStateStore } from "./state";
 
 export type SponsorOperation = "add-dust" | "finalize" | "submit";
 export type SponsorBinding = Readonly<{
@@ -38,6 +39,8 @@ export type SponsorServiceOptions = Readonly<{
   now?: () => number;
   authenticate?: (token: string) => Promise<{ accountId: string } | null>;
   verifySignature?: (input: { publicKey: string; signature: string; message: string }) => boolean | Promise<boolean>;
+  /** Durable CAS/idempotency/quota state. Omit only for unit-test harnesses. */
+  stateStore?: SponsorStateStore;
   /**
    * The injected adapter must submit through the provider and then observe the
    * network finality, indexer visibility, and fresh ledger state.  A request
@@ -104,6 +107,7 @@ export class SponsorService {
     authenticate: NonNullable<SponsorServiceOptions["authenticate"]>;
     verifySignature: NonNullable<SponsorServiceOptions["verifySignature"]>;
     submit: NonNullable<SponsorServiceOptions["submit"]>;
+    stateStore?: SponsorStateStore;
   };
 
   public constructor(options: SponsorServiceOptions = {}) {
@@ -130,6 +134,7 @@ export class SponsorService {
       // The HTTP entrypoint is intentionally inert until the deployment
       // injects a provider-backed submitter.
       submit: options.submit ?? (async () => { throw new Error("sponsor submitter is not configured"); }),
+      stateStore: options.stateStore,
     };
   }
 
@@ -154,7 +159,16 @@ export class SponsorService {
 
     const idempotencyId = `${auth.accountId}:${request.idempotencyKey}`;
     const authorizationDigest = digest(message);
-    const prior = this.records.get(idempotencyId);
+    let prior = this.records.get(idempotencyId);
+    try {
+      if (!prior && this.options.stateStore) {
+        const persisted = await this.options.stateStore.loadCompleted(idempotencyId);
+        if (persisted) {
+          if (persisted.accountId !== auth.accountId) return failure("POLICY_REJECTED", "idempotency record is bound to a different account", false);
+          prior = { transaction: persisted.transaction, authorizationDigest: persisted.authorizationDigest };
+        }
+      }
+    } catch { return failure("UPSTREAM_REJECTED", "durable sponsor state is unavailable; no transaction was submitted", true); }
     if (prior) {
       if (prior.authorizationDigest !== authorizationDigest) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
       return { ok: true, transaction: prior.transaction };
@@ -166,7 +180,16 @@ export class SponsorService {
       return pending.result;
     }
 
-    const uncertain = this.uncertain.get(idempotencyId);
+    let uncertain = this.uncertain.get(idempotencyId);
+    try {
+      if (!uncertain && this.options.stateStore) {
+        const persisted = await this.options.stateStore.loadUncertain(idempotencyId);
+        if (persisted) {
+          if (persisted.accountId !== auth.accountId) return failure("POLICY_REJECTED", "reconciliation record is bound to a different account", false);
+          uncertain = { authorizationDigest: persisted.authorizationDigest };
+        }
+      }
+    } catch { return failure("UPSTREAM_REJECTED", "durable sponsor state is unavailable; no transaction was submitted", true); }
     if (uncertain) {
       if (uncertain.authorizationDigest !== authorizationDigest) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
       return failure("TIMEOUT", "the sponsor submission outcome is still being reconciled; do not retry this action", false);
@@ -186,38 +209,87 @@ export class SponsorService {
 
   private async submitAuthorized(request: SponsorRequest, accountId: string, idempotencyId: string, authorizationDigest: string, now: number): Promise<SponsorResult> {
     this.prune(now);
-    const usage = this.accountUsage.get(accountId) ?? { timestamps: [] };
-    if (usage.timestamps.length >= this.options.accountQuota || this.globalUsage.length >= this.options.globalQuota) return failure("QUOTA_EXCEEDED", "sponsorship quota is exhausted", true);
+    if (this.options.stateStore) {
+      try {
+        const allowed = await this.options.stateStore.reserveQuota({ accountId, idempotencyId, now, accountLimit: this.options.accountQuota, globalLimit: this.options.globalQuota });
+        if (!allowed) return failure("QUOTA_EXCEEDED", "sponsorship quota is exhausted", true);
+      } catch { return failure("UPSTREAM_REJECTED", "durable sponsor quota state is unavailable; no transaction was submitted", true); }
+    } else {
+      const usage = this.accountUsage.get(accountId) ?? { timestamps: [] };
+      if (usage.timestamps.length >= this.options.accountQuota || this.globalUsage.length >= this.options.globalQuota) return failure("QUOTA_EXCEEDED", "sponsorship quota is exhausted", true);
+    }
+
+    if (this.options.stateStore) {
+      try {
+        const claim = await this.options.stateStore.claimUncertain(idempotencyId, { accountId, authorizationDigest });
+        if (claim.authorizationDigest !== authorizationDigest || claim.accountId !== accountId) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
+        if (!claim.acquired) return failure("TIMEOUT", "the sponsor submission outcome is still being reconciled; do not retry this action", false);
+      } catch { return failure("UPSTREAM_REJECTED", "durable sponsor state is unavailable; no transaction was submitted", true); }
+    }
 
     const controller = new AbortController();
     let submission: Promise<FinalizedSponsorSubmission>;
     try { submission = Promise.resolve(this.options.submit(request, this.dustCap(), controller.signal)); }
-    catch { return failure("UPSTREAM_REJECTED", "the network rejected the sponsored action", true); }
+    catch {
+      if (this.options.stateStore) await this.options.stateStore.clearUncertain(idempotencyId, authorizationDigest).catch(() => undefined);
+      return failure("UPSTREAM_REJECTED", "the network rejected the sponsored action", true);
+    }
 
-    const result = await withTimeout(submission, this.options.timeoutMs);
+    let result: FinalizedSponsorSubmission | null;
+    try {
+      result = await withTimeout(submission, this.options.timeoutMs);
+    } catch {
+      // A rejected provider promise is not proof that the network did not
+      // receive the request. Keep the durable reconciliation marker and make
+      // the local harness equally conservative before offering the wallet
+      // funded fallback.
+      controller.abort();
+      if (!this.options.stateStore) this.uncertain.set(idempotencyId, { authorizationDigest });
+      return failure("UPSTREAM_REJECTED", "the sponsored action could not be finalized; its outcome is being reconciled", true);
+    }
     if (!result) {
       controller.abort();
-      this.uncertain.set(idempotencyId, { authorizationDigest });
+      if (!this.options.stateStore) this.uncertain.set(idempotencyId, { authorizationDigest });
       void submission.then(
-        (lateResult) => {
-          if (this.uncertain.get(idempotencyId)?.authorizationDigest !== authorizationDigest) return;
-          if (!hasIndependentFinality(lateResult, request)) { this.uncertain.delete(idempotencyId); return; }
-          this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, lateResult, this.options.now());
-          this.uncertain.delete(idempotencyId);
+        async (lateResult) => {
+          const current = this.options.stateStore ? await this.options.stateStore.loadUncertain(idempotencyId).catch(() => null) : this.uncertain.get(idempotencyId);
+          if (current?.authorizationDigest !== authorizationDigest) return;
+          if (!hasIndependentFinality(lateResult, request)) return;
+          const lateStored = await this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, lateResult, this.options.now());
+          // Keep the reconciliation marker when durable completion could not
+          // be recorded.  Clearing it first would permit a second sponsor
+          // submission while the original transaction remains ambiguous.
+          if (lateStored.ok) {
+            if (this.options.stateStore) await this.options.stateStore.clearUncertain(idempotencyId, authorizationDigest).catch(() => undefined);
+            else this.uncertain.delete(idempotencyId);
+          }
         },
-        () => {
-          if (this.uncertain.get(idempotencyId)?.authorizationDigest === authorizationDigest) this.uncertain.delete(idempotencyId);
+        async () => {
+          // A provider promise rejecting does not prove that the request never
+          // reached the network. Durable uncertain rows remain until a
+          // reconciliation operator resolves them. The local harness follows
+          // the same conservative rule so a late rejection cannot reopen the
+          // idempotency key for a second sponsored submission.
         },
       );
       return failure("TIMEOUT", `sponsor timed out after ${this.options.timeoutMs} milliseconds; the submission is being reconciled`, false);
     }
     if (!hasIndependentFinality(result, request)) return failure("UPSTREAM_REJECTED", "the sponsored action did not produce independently observed finality", true);
 
-    return this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, result, now);
+    const stored = await this.storeSuccessfulSubmission(request, accountId, idempotencyId, authorizationDigest, result, now);
+    if (stored.ok && this.options.stateStore) await this.options.stateStore.clearUncertain(idempotencyId, authorizationDigest);
+    return stored;
   }
 
-  private storeSuccessfulSubmission(request: SponsorRequest, accountId: string, idempotencyId: string, authorizationDigest: string, result: FinalizedSponsorSubmission, now: number): SponsorResult {
+  private async storeSuccessfulSubmission(request: SponsorRequest, accountId: string, idempotencyId: string, authorizationDigest: string, result: FinalizedSponsorSubmission, now: number): Promise<SponsorResult> {
     const transaction: SponsoredTransaction = Object.freeze({ idempotencyKey: request.idempotencyKey, operation: request.operation, transactionId: result.transactionId, dustAdded: request.operation === "add-dust" ? this.dustCap() : 0n, networkFinalized: result.networkFinalized, indexerVisible: result.indexerVisible, ledgerConfirmed: result.ledgerConfirmed });
+    if (this.options.stateStore) {
+      try {
+        const stored = await this.options.stateStore.putCompleted(idempotencyId, { accountId, authorizationDigest, transaction });
+        if (stored.authorizationDigest !== authorizationDigest || stored.accountId !== accountId) return failure("POLICY_REJECTED", "idempotency key was reused for a different authorization", false);
+        return { ok: true, transaction: stored.transaction };
+      } catch { return failure("UPSTREAM_REJECTED", "durable sponsor state could not record the finalized transaction", true); }
+    }
     this.records.set(idempotencyId, { transaction, authorizationDigest });
     this.prune(now);
     const currentUsage = this.accountUsage.get(accountId) ?? { timestamps: [] };
@@ -290,6 +362,6 @@ function failure(code: Exclude<SponsorResult, { ok: true }>["code"], message: st
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function hasIndependentFinality(result: unknown, request: SponsorRequest): result is FinalizedSponsorSubmission {
   if (!isRecord(result)) return false;
-  return typeof result.transactionId === "string" && Boolean(result.transactionId.trim()) && result.transactionId !== request.idempotencyKey && result.networkFinalized === true && result.indexerVisible === true && result.ledgerConfirmed === true;
+  return typeof result.transactionId === "string" && /^0x[0-9a-fA-F]{64}$/.test(result.transactionId) && result.transactionId !== request.idempotencyKey && result.networkFinalized === true && result.indexerVisible === true && result.ledgerConfirmed === true;
 }
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> { let timer: ReturnType<typeof setTimeout> | undefined; try { return await Promise.race([promise, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); })]); } finally { if (timer) clearTimeout(timer); } }

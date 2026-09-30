@@ -21,6 +21,10 @@
   "gates": {
     "compactCompile": true,
     "zkKeysGenerated": false,
+    "contractIntegrationAttested": false,
+    "custodyMovementAttested": false,
+    "winnerSelectionAttested": false,
+    "faucetTimingAttested": false,
     "propertyMatrix": true,
     "adversarialReplayMatrix": true,
     "scaleMatrix": true,

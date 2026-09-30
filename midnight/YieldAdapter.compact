@@ -10,6 +10,11 @@ export ledger checkpointedDraws: Uint<64>;
 export ledger pendingReplenishment: Uint<64>;
 export ledger replenishmentAvailableAt: Uint<64>;
 export ledger rollover: Uint<64>;
+export ledger operatorAuthority: Bytes<32>;
+export ledger governanceAuthority: Bytes<32>;
+
+witness operator_secret(): Bytes<32>;
+witness governance_secret(): Bytes<32>;
 
 constructor() {
   prizeReserve = 1000000000000;
@@ -19,23 +24,35 @@ constructor() {
   pendingReplenishment = 0;
   replenishmentAvailableAt = 0;
   rollover = 0;
+  operatorAuthority = disclose(authorityCommitment(operator_secret()));
+  governanceAuthority = disclose(authorityCommitment(governance_secret()));
+}
+
+export pure circuit authorityCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/yield-authority/v1"), secret]);
 }
 
 export circuit markDrawComplete(draw: Uint<64>): [] {
-  assert(draw >= completedDraws, "draw ids cannot move backwards");
+  const caller = authorityCommitment(operator_secret());
+  assert(disclose(caller == operatorAuthority), "yield operator is not authenticated");
+  assert(draw == completedDraws + 1, "draw ids must advance exactly once");
   completedDraws = disclose(draw);
 }
 
 export circuit checkpoint(): [] {
+  const caller = authorityCommitment(operator_secret());
+  assert(disclose(caller == operatorAuthority), "yield operator is not authenticated");
   assert(completedDraws >= checkpointedDraws, "checkpoint state is invalid");
   const delta = completedDraws - checkpointedDraws;
-  assert(delta <= 1, "one checkpoint may accrue one completed draw");
+  assert(delta > 0 && delta <= 1, "one checkpoint may accrue one completed draw");
   assert(prizeReserve + delta * 100000000 <= supplyCap, "tMIX supply cap exceeded");
   prizeReserve = (prizeReserve + delta * 100000000) as Uint<64>;
   checkpointedDraws = completedDraws;
 }
 
 export circuit requestReplenishment(amount: Uint<64>, now: Uint<64>): [] {
+  const caller = authorityCommitment(governance_secret());
+  assert(disclose(caller == governanceAuthority), "replenishment authority is not authenticated");
   assert(amount > 0 && amount <= 1000000000000, "replenishment is bounded");
   assert(pendingReplenishment == 0, "replenishment already pending");
   assert(prizeReserve + amount <= supplyCap, "replenishment exceeds remaining supply");
@@ -44,6 +61,8 @@ export circuit requestReplenishment(amount: Uint<64>, now: Uint<64>): [] {
 }
 
 export circuit executeReplenishment(now: Uint<64>): [] {
+  const caller = authorityCommitment(governance_secret());
+  assert(disclose(caller == governanceAuthority), "replenishment authority is not authenticated");
   assert(pendingReplenishment > 0, "no replenishment pending");
   assert(now >= replenishmentAvailableAt, "replenishment timelock has not elapsed");
   prizeReserve = (prizeReserve + pendingReplenishment) as Uint<64>;
@@ -51,4 +70,10 @@ export circuit executeReplenishment(now: Uint<64>): [] {
   replenishmentAvailableAt = 0;
 }
 
-export circuit recordRollover(amount: Uint<64>): [] { rollover = (rollover + disclose(amount)) as Uint<64>; }
+export circuit recordRollover(amount: Uint<64>): [] {
+  const caller = authorityCommitment(operator_secret());
+  assert(disclose(caller == operatorAuthority), "yield operator is not authenticated");
+  assert(amount > 0, "rollover amount is required");
+  assert(rollover + amount <= prizeReserve, "rollover exceeds segregated prize custody");
+  rollover = (rollover + disclose(amount)) as Uint<64>;
+}

@@ -141,7 +141,9 @@ describe("Shroudly Preprod protocol reference", () => {
     expect(winner).toBeDefined();
     const claimed = pool.claimPrize(winner!.secret, winner!.salt, finalized.revealClosesAt);
     expect(claimed).toBe(finalized.prizeMicroUnits);
-    expect(() => pool.claimPrize(winner!.secret, winner!.salt, finalized.revealClosesAt)).toThrow(/already.*consumed|no unclaimed/);
+    expect(() => pool.claimPrize(winner!.secret, winner!.salt, finalized.revealClosesAt)).toThrow(/draw has not been finalized/);
+    expect(pool.snapshot(finalized.revealClosesAt).draw.drawId).toBe(finalized.drawId + 1n);
+    expect(pool.snapshot(finalized.revealClosesAt).draw.winningCommitment).toBeUndefined();
     pool.assertSolvent();
   });
 

@@ -28,6 +28,7 @@ The accepted compatibility profile is Compact CLI/devtools 0.5.2, Compact langua
 apps/web/               Shroudly participant application and Playwright journeys
 packages/contracts/     Compact component metadata and reference tests
 packages/sponsor/       Stateless DUST Sponsor Service HTTP boundary
+packages/randomness-signer/  Contributor-scoped Preprod randomness boundary
 midnight/               Four Compact contracts and generated build inputs
 scripts/                Compile, profile, health, reset, and evidence commands
 docs/operations/        Runbook, incident templates, and evidence conventions
@@ -70,6 +71,9 @@ node scripts/preprod-randomness.mjs commit --draw <draw-id> --deployment <deploy
 node scripts/preprod-randomness.mjs reveal --draw <draw-id> --deployment <deployment-id> --contributor <render|github-actions|offline-maintainer>
 node scripts/preprod-evidence.mjs --out evidence/preprod
 node scripts/reset-preprod.mjs --deployment <deployment-id>
+# Provision the isolated Stage 7 Render services (RENDER_API_KEY is read from
+# the process environment; no credential is printed).
+node scripts/deploy-render-stage7.mjs
 ```
 
 Evidence is sanitized, hashed, and tied to the immutable source revision. A transaction is successful only after network finality, indexer visibility, and a fresh ledger-state query. Qualified evidence additionally requires an externally signed attestation from the verifier fingerprint pinned in the reviewed Compatibility Profile; a caller-supplied key alone can never qualify a bundle. Five isolated wallets and the supported Lace gate are human-operated release checks; no automated wallet bridge is bundled.

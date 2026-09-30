@@ -59,7 +59,17 @@ if (args.submit) {
   try { parsedEndpoint = new URL(endpoint); } catch { usage(`${endpointName} must be a valid URL`); }
   if (parsedEndpoint.protocol !== "https:") usage(`${endpointName} must use HTTPS`);
   const response = await fetch(parsedEndpoint, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(payload) });
-  if (!response.ok) { process.stderr.write(`randomness ${action} was rejected (${response.status})\n`); process.exitCode = 1; }
+  if (!response.ok) {
+    process.stderr.write(`randomness ${action} was rejected (${response.status})\n`);
+    process.exitCode = 1;
+  } else {
+    let result;
+    try { result = await response.json(); } catch { result = null; }
+    if (!result?.ok || !/^0x[0-9a-fA-F]{64}$/.test(result.transaction?.transactionId ?? "") || result.transaction.networkFinalized !== true || result.transaction.indexerVisible !== true || result.transaction.ledgerConfirmed !== true) {
+      process.stderr.write(`randomness ${action} did not return independently observed finality\n`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 // The seed is never printed or written. A reveal is a public protocol value;

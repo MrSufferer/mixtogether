@@ -4,10 +4,20 @@ import { PROGRAM_CONSTANTS, MAINNET_INTERFACE } from "./constants";
 export const SHROUDLY_ENVIRONMENT = "preprod" as const;
 export const SHROUDLY_NETWORK_ID = "preprod" as const;
 
+export type ShroudlyContractIds = Readonly<Record<"asset" | "randomness" | "yield" | "pool", string>>;
+
+export const MIDNIGHT_CONTRACT_IDS: ShroudlyContractIds = Object.freeze({
+  asset: import.meta.env.VITE_SHROUDLY_ASSET_CONTRACT_ID ?? "unassigned",
+  randomness: import.meta.env.VITE_SHROUDLY_RANDOMNESS_CONTRACT_ID ?? "unassigned",
+  yield: import.meta.env.VITE_SHROUDLY_YIELD_CONTRACT_ID ?? "unassigned",
+  pool: import.meta.env.VITE_SHROUDLY_POOL_CONTRACT_ID ?? "unassigned",
+});
+
 export const MIDNIGHT_NETWORK_CONFIG = Object.freeze({
   environment: SHROUDLY_ENVIRONMENT,
   network: SHROUDLY_NETWORK_ID,
   deploymentId: import.meta.env.VITE_SHROUDLY_DEPLOYMENT_ID ?? "shroudly-preprod-unassigned",
+  contractIds: MIDNIGHT_CONTRACT_IDS,
   rpcUrl: import.meta.env.VITE_SHROUDLY_RPC_URL ?? "https://rpc.preprod.midnight.network",
   indexerGraphqlUrl: import.meta.env.VITE_SHROUDLY_INDEXER_URL ?? "https://indexer.preprod.midnight.network/api/v4/graphql",
   zkConfigUrl: import.meta.env.VITE_SHROUDLY_ZK_CONFIG_URL ?? "",
@@ -30,9 +40,14 @@ export const MIDNIGHT_VERSION_PROFILE = Object.freeze({
   proofServer: "8.1.0",
 });
 
+// This is deliberately null until the human qualification run has been
+// performed by the approved verifier. A local build must never manufacture a
+// qualification identity that could be mistaken for release evidence.
+export const MIDNIGHT_QUALIFICATION_VERIFIER_FINGERPRINT: string | null = null;
+
 export const MIDNIGHT_PROVIDER_STATUS = [
   ["Private state", "Encrypted locally with Recovery Kit"],
-  ["Proofs", "Official local proof provider"],
+  ["Proofs", "Wallet-bound proving (release binding required)"],
   ["Public data", "Indexer plus fresh ledger confirmation"],
   ["DUST", "Explicit sponsorship approval"],
 ] as const;

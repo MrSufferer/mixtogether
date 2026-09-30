@@ -3,15 +3,15 @@
 This directory contains the four pinned Compact components that make up the
 Shroudly Preprod release:
 
-- `TmixAsset.compact` — shielded six-decimal `tMIX`, cap, faucet nullifiers,
-  and the isolated evidence allocation.
+- `TmixAsset.compact` — shielded six-decimal `tMIX`, cap, one-shot reserve
+  seeding, faucet nullifiers, and the isolated evidence allocation.
 - `RandomnessThreshold.compact` — three registered contributors, unique
   commits/reveals, fixed deadlines, and a two-of-three aggregate.
 - `YieldAdapter.compact` — segregated Prize Reserve, deterministic simulated
   yield, bounded replenishment, and rollover.
 - `PrizePool.compact` — Principal custody, private account notes/TWAB,
-  Disclosure Cohort, winner commitment, Claim Nullifier, pause authority, and
-  deployer removal.
+  Disclosure Cohort, in-circuit weighted winner selection, Claim Nullifier,
+  shielded payout, pause authority, rollover, and deployer removal.
 
 `pnpm midnight:compile` performs the reproducible source compile and writes
 only to the ignored `midnight/managed/` directory. `pnpm midnight:compile:keys`

@@ -273,16 +273,29 @@ if ! confirm "Are the five participant wallets and separate authorities funded a
 fi
 
 stage "Deploy the four Preprod contracts and seed the reserve"
-say "Use the reviewed protected deployment workflow for the pinned Midnight toolchain."
+say "Run the protected, resumable deployment workflow for the pinned Midnight toolchain."
 open_url "$REPO_URL/issues/18"
 open_url "https://docs.midnight.network/relnotes/support-matrix"
-warn "The repository does not provide a human-safe one-line deployment command. Use the reviewed procedure in docs/operations/runbook.md and the protected deployment environment; do not invent a command or paste a key here."
-step 'Run the reviewed preflight `pnpm midnight:compile:keys` followed by `pnpm midnight:profile`; require all four artifacts, expected prover/verifier pairs, and the approved Compatibility Profile facts to match before entering deployment.'
-step "Deploy the four contracts, pin their dependency/artifact inputs, and seed the initial Prize Reserve plus the one-shot isolated evidence fixture through bounded circuits. Never use deployer minting for qualification."
-step "For each transaction, verify network finality, indexer visibility, and a fresh ledger read before treating it as successful."
-step "Record the immutable deployment ID, four public contract IDs, and four 0x-prefixed artifact hashes in the protected release worksheet. Stage 9 will capture only those public values for local/Vercel config."
-pause "After the reviewed deployment and reserve-seeding workflow has produced finalized outputs, press Enter"
-if ! confirm "Are all four contracts finalized on Preprod, the reserve/fixture seeded safely, and the public IDs/hashes recorded?"; then
+step 'Run `pnpm midnight:deploy:preprod -- --submit` from the protected deployment environment. The command runs `midnight:compile:keys` and `midnight:profile` itself, checks the Preprod profile, and reads the deployer plus distinct authority entries from macOS Keychain.'
+step 'If the process is interrupted after a verified transaction, inspect the protected receipt and resume with `pnpm midnight:deploy:preprod -- --submit --resume`. Never delete or edit an in-progress receipt to force a retry.'
+step "The runner deploys TmixAsset, RandomnessThreshold, YieldAdapter, and PrizePool in dependency order; derives and pins tMIX color; seeds the real PrizePool reserve; then submits only the bounded evidence fixture allocation."
+step "Every transaction must pass network finality, indexer visibility, and a fresh ledger read. No deployer mint or authority secret is printed, logged, placed in evidence, or captured by this wizard."
+STAGE4_RECEIPT="$REPO_ROOT/evidence/preprod-stage4.json"
+if [[ -f "$STAGE4_RECEIPT" ]]; then
+  if node "$REPO_ROOT/scripts/midnight-deploy-preprod.mjs" --validate --receipt "$STAGE4_RECEIPT"; then
+    note "A finalized Stage 4 receipt is already present and valid; its immutable public values are the source for later configuration."
+  else
+    warn "The existing Stage 4 receipt failed validation; inspect it with the deployment maintainer before continuing."
+    exit 1
+  fi
+else
+  pause "After the protected deployment command has produced evidence/preprod-stage4.json, press Enter"
+  if ! node "$REPO_ROOT/scripts/midnight-deploy-preprod.mjs" --validate --receipt "$STAGE4_RECEIPT"; then
+    warn "Stage 4 receipt validation failed; stopping before any later-stage values are captured."
+    exit 1
+  fi
+fi
+if ! confirm "Is the immutable Stage 4 receipt valid, with all four finalized contracts, reserveSeeded, and automationIssued confirmed?"; then
   warn "Contract deployment is not confirmed; stopping."
   exit 1
 fi
@@ -372,7 +385,8 @@ VITE_SHROUDLY_RPC_URL="https://rpc.preprod.midnight.network"
 VITE_SHROUDLY_INDEXER_URL="https://indexer.preprod.midnight.network/api/v4/graphql"
 write_env VITE_SHROUDLY_RPC_URL "$VITE_SHROUDLY_RPC_URL"
 write_env VITE_SHROUDLY_INDEXER_URL "$VITE_SHROUDLY_INDEXER_URL"
-ask VITE_SHROUDLY_ZK_CONFIG_URL "Paste the pinned ZK configuration URL, or press Enter if optional:"
+ask VITE_SHROUDLY_ZK_CONFIG_URL "Paste the pinned ZK configuration URL:"
+require_https VITE_SHROUDLY_ZK_CONFIG_URL "$VITE_SHROUDLY_ZK_CONFIG_URL"
 ask VITE_SHROUDLY_SPONSOR_URL "Paste the public Sponsor Service URL:"
 require_https VITE_SHROUDLY_SPONSOR_URL "$VITE_SHROUDLY_SPONSOR_URL"
 ask VITE_SHROUDLY_ASSET_CONTRACT_ID "Paste the public TmixAsset contract ID:"

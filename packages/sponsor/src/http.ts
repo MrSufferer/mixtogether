@@ -1,13 +1,15 @@
-import { SponsorService } from "./service";
+import { SponsorService } from "./service.ts";
 
 export async function handleSponsorRequest(request: Request, service = new SponsorService()): Promise<Response> {
   if (request.method !== "POST") return json({ ok: false, code: "POLICY_REJECTED", message: "POST is required", retryable: false, fallback: "participant-funded-dust" }, 405);
   const authorization = request.headers.get("authorization") ?? "";
-  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+  const token = /^Bearer\s+\S+$/.test(authorization) ? authorization.slice(7).trim() : undefined;
   let body: unknown;
   try { body = await request.json(); } catch { return json({ ok: false, code: "INVALID_TRANSACTION", message: "request body is invalid JSON", retryable: false, fallback: "participant-funded-dust" }, 400); }
   const normalized = normalizeJsonBody(body);
-  const result = await service.handle(token, normalized);
+  let result;
+  try { result = await service.handle(token, normalized); }
+  catch { return json({ ok: false, code: "UPSTREAM_REJECTED", message: "sponsor service is unavailable; use participant-funded DUST", retryable: true, fallback: "participant-funded-dust" }, 503); }
   return json(result, result.ok ? 200 : result.code === "UNAUTHORIZED" ? 401 : result.code === "TIMEOUT" ? 504 : 400);
 }
 

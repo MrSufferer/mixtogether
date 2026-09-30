@@ -55,10 +55,16 @@ configuration:
 
 Keep these names in provider secret stores and inject them only on the server
 or workflow runner: `MIDNIGHT_DEPLOYER_SECRET_NAME`,
-`MIDNIGHT_GOVERNANCE_SECRET_NAME`, `MIDNIGHT_RANDOMNESS_SECRET_NAME`,
+`MIDNIGHT_GOVERNANCE_SECRET_NAME`, `MIDNIGHT_RESERVE_SECRET_NAME`,
+`MIDNIGHT_RANDOMNESS_SECRET_NAME`,
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `RESEND_FROM`,
-`BETTER_STACK_HEARTBEAT_URL`, and the Render signer credentials. A `VITE_`
-prefix is never a safe place for a usable credential.
+`BETTER_STACK_HEARTBEAT_URL`, and the Render signer credentials. For the
+contributor-scoped Preprod Render boundary, the server-side names are
+`SHROUDLY_RANDOMNESS_DEPLOYMENT_ID`, `SHROUDLY_RANDOMNESS_CONTRACT_ID`,
+`SHROUDLY_RANDOMNESS_UPSTREAM_URL`, `SHROUDLY_RANDOMNESS_UPSTREAM_TOKEN`, and
+`SHROUDLY_RENDER_AUTOMATION_TOKEN`; the contributor runner receives only its
+matching endpoint and token. A `VITE_` prefix is never a safe place for a
+usable credential.
 
 Vercel variables are the canonical configuration for a deployed build. Run the
 profile generator at build time and publish only its sanitized output. A value
@@ -86,17 +92,33 @@ change requires a new deployment and new evidence; do not edit a live build.
    `pnpm build`. Store the generated source hashes in the release worksheet.
 2. Apply the Supabase migration before enabling Backup Accounts. Verify RLS
    with an anonymous client, a normal authenticated client, and an AAL2 client.
-3. In the provider's protected workspace, run the reviewed
-   `pnpm midnight:compile:keys` preflight and confirm `pnpm midnight:profile`
-   reports matching CLI/compiler/language/runtime facts, four contract
-   artifacts, and every expected prover/verifier pair. Keep generated proving
-   material in that workspace. Deploy `TmixAsset`,
+3. In the provider's protected workspace, run the read-only gate first:
+   `pnpm midnight:deploy:preprod -- --check`. Inspect every check and stop if
+   any gate is red; `--check` creates no secrets, state, receipt, or
+   transactions. Only after it passes, run
+   `pnpm midnight:deploy:preprod -- --submit`. The command runs the
+   `pnpm midnight:compile:keys` and `pnpm midnight:profile` preflight, reads
+   the deployer and distinct contract authorities from macOS Keychain, checks
+   synchronized Preprod NIGHT/DUST balances, and writes only the mode-0600
+   `evidence/preprod-stage4.json` receipt. If interrupted after a verified
+   transaction, resume with `pnpm midnight:deploy:preprod -- --submit
+   --resume`; never edit a receipt. Deploy `TmixAsset`,
    `RandomnessThreshold`, `YieldAdapter`, then `PrizePool`, pinning each
    dependency ID in the next deployment transaction.
-4. Seed the initial Prize Reserve and the one-shot isolated evidence fixture
-   allocation through the bounded contract circuits. There is no deployer mint.
-5. Deploy the Sponsor Service and configure its health check at `/healthz`.
-   A service without injected Backup Account authentication fails closed.
+   The protected release assembly must bind the generated Compact artifacts to
+   the pinned Midnight.js providers, wallet-owned proving API, durable private
+   state, and the Keychain-backed deployer. Contract IDs and endpoints alone
+   are not sufficient.
+4. Using the separately held reserve authority, call the one-shot
+   `TmixAsset.seedPrizeReserve(PrizePool)` circuit, then make the one-shot
+   isolated evidence fixture allocation through its bounded circuit. There is
+   no deployer mint and the asset contract rejects faucet/fixture issuance
+   until the reserve has been seeded.
+5. Deploy the Sponsor Service and the contributor-scoped randomness boundary;
+   configure both health checks at `/healthz`. A service without its complete
+   provider-backed configuration fails closed. The Stage 7 provisioning
+   command is `node scripts/deploy-render-stage7.mjs`; it creates no provider
+   secret values and is safe to rerun against the same service names.
 6. Deploy the Vercel Preprod project with the sanitized variables. Verify the
    public `/build-profile.json` matches the release worksheet and contains no
    secret names or values.

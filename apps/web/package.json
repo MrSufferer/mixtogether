@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node ../../scripts/generate-build-profile.mjs --out apps/web/public/build-profile.json && tsc -b && vite build",
+    "build:production": "node ../../scripts/generate-build-profile.mjs --production --out apps/web/public/build-profile.json && tsc -b && vite build",
     "lint": "tsc -b",
     "typecheck": "tsc -b",
     "test": "vitest run",

@@ -11,6 +11,8 @@ export type ConnectionStatus =
   | "unsupported-network"
   | "unsupported-version";
 
+export type ParticipantStateStatus = "unavailable" | "available" | "stale";
+
 export type SponsorshipChoice = "sponsored" | "participant-funded";
 
 export type ErrorCode =
@@ -63,6 +65,13 @@ export type WalletSnapshot = Readonly<{
   apiVersion: string;
 }>;
 
+export type ParticipantAccountSnapshot = Readonly<{
+  balanceMicroUnits: bigint;
+  principalMicroUnits: bigint;
+  twabSeconds: bigint;
+  unclaimedPrizeMicroUnits: bigint;
+}>;
+
 export type PublicDrawSnapshot = Readonly<{
   drawId: bigint;
   phase: "open" | "closed" | "revealing" | "finalized" | "rolled-over";
@@ -78,6 +87,11 @@ export type PublicDrawSnapshot = Readonly<{
   rolloverMicroUnits: bigint;
 }>;
 
+export type ParticipantStateSnapshot = Readonly<{
+  account: ParticipantAccountSnapshot;
+  draw: PublicDrawSnapshot;
+}>;
+
 export type ParticipantSnapshot = Readonly<{
   connection: ConnectionStatus;
   wallet: WalletSnapshot | null;
@@ -86,6 +100,8 @@ export type ParticipantSnapshot = Readonly<{
     deploymentId: string;
     mainnetTransactionsEnabled: false;
   }>;
+  stateStatus: ParticipantStateStatus;
+  stateMessage: string | null;
   privateBalanceMicroUnits: bigint;
   principalMicroUnits: bigint;
   unclaimedPrizeMicroUnits: bigint;

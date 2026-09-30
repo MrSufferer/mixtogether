@@ -10,6 +10,7 @@ if (!outputArg || outputArg.startsWith("-")) throw new Error("--out requires a f
 const output = resolve(root, outputArg);
 const sourceNames = ["TmixAsset", "RandomnessThreshold", "YieldAdapter", "PrizePool"];
 const env = process.env;
+const releaseBuild = process.argv.includes("--production") || envFlag("SHROUDLY_RELEASE_BUILD");
 const sourceArtifactHashes = sourceNames.map((name) => `0x${createHash("sha256").update(readFileSync(resolve(root, "midnight", `${name}.compact`))).digest("hex")}`);
 const configuredArtifactHashValues = [env.VITE_SHROUDLY_ASSET_ARTIFACT_HASH, env.VITE_SHROUDLY_RANDOMNESS_ARTIFACT_HASH, env.VITE_SHROUDLY_YIELD_ARTIFACT_HASH, env.VITE_SHROUDLY_POOL_ARTIFACT_HASH];
 const configuredArtifactHashes = configuredArtifactHashValues.filter((value) => value !== undefined && value !== "");
@@ -77,7 +78,34 @@ const profile = {
   deployerDeadlineSeconds: "86400",
   mainnetTransactionsEnabled: false,
 };
+if (releaseBuild) validateReleaseProfile(profile, configuredArtifactHashes);
 profile.snapshotHash = `0x${createHash("sha256").update(JSON.stringify(profile)).digest("hex")}`;
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o644 });
 console.log(`Wrote sanitized Shroudly build profile to ${output.replace(`${root}/`, "")}`);
+
+function envFlag(name) { return env[name] === "1"; }
+
+function validateReleaseProfile(candidate, configuredHashes) {
+  if (!candidate.deploymentId || candidate.deploymentId === "shroudly-preprod-unassigned") throw new Error("release build requires an immutable Shroudly deployment ID");
+  for (const [name, value] of Object.entries(candidate.contractIds)) {
+    if (!value || value === "unassigned") throw new Error(`release build requires the ${name} contract ID`);
+  }
+  for (const [name, value] of Object.entries(candidate.endpoints)) {
+    if (!value) throw new Error(`release build requires a ${name} endpoint`);
+    assertHttpsEndpoint(`${name} endpoint`, value);
+  }
+  if (configuredHashes.length !== sourceNames.length || configuredHashes.some((value) => !/^0x[0-9a-fA-F]{64}$/.test(value))) {
+    throw new Error("release build requires all four explicitly configured Compact artifact hashes");
+  }
+  if (!/^[a-f0-9]{64}$/.test(candidate.qualificationVerifierFingerprint ?? "")) {
+    throw new Error("release build requires the reviewed qualification verifier fingerprint");
+  }
+  if (candidate.mainnetTransactionsEnabled !== false || candidate.networkId !== "preprod") throw new Error("release build must remain on Midnight Preprod with Mainnet disabled");
+}
+
+function assertHttpsEndpoint(label, value) {
+  let parsed;
+  try { parsed = new URL(value); } catch { throw new Error(`${label} must be a valid HTTPS URL`); }
+  if (parsed.protocol !== "https:") throw new Error(`${label} must use HTTPS`);
+}

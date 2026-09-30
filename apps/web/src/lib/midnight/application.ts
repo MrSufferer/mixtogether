@@ -5,7 +5,7 @@ import { domain, hashWords, type Hex } from "./hashing";
 import { PrizePoolLedger } from "./pool";
 import { createRecoveryBundle, exportPrivateState, generateRecoveryKit, parseRecoveryBundle, runRecoveryReadinessCheck, serializeRecoveryBundle, type RecoveryBundle, type RecoveryKitKey } from "./recovery";
 import type { PrivateStateBackup } from "./private-state";
-import { ParticipantError, type CommandReceipt, type ParticipantSnapshot, type SponsorshipChoice, type WalletSnapshot } from "./types";
+import { ParticipantError, type CommandReceipt, type ParticipantAccountSnapshot, type ParticipantSnapshot, type ParticipantStateStatus, type SponsorshipChoice, type WalletSnapshot } from "./types";
 import { fromMicroUnits, toMicroUnits } from "./constants";
 
 export type ParticipantCommand = "faucetClaim" | "contribute" | "withdraw" | "checkpointYield" | "finalizeDraw" | "claimPrize";
@@ -47,8 +47,11 @@ export interface ParticipantAdapter {
   disconnect(): Promise<void>;
   currentWallet(): WalletSnapshot | null;
   command(command: ParticipantCommand, amount?: bigint, sponsorship?: SponsorshipChoice): Promise<CommandReceipt>;
-  account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint };
+  account(): ParticipantAccountSnapshot;
   draw(): ParticipantSnapshot["draw"];
+  stateStatus?(): ParticipantStateStatus;
+  stateMessage?(): string | null;
+  refreshState?(): Promise<void>;
   advanceTime?(seconds: bigint): void;
   recoveryState(): unknown;
   restoreRecoveryState(state: unknown, generation: bigint): Promise<void> | void;
@@ -79,6 +82,7 @@ export class ParticipantApplicationClient implements ParticipantApplication {
       if (MIDNIGHT_NETWORK_CONFIG.network !== "preprod") throw new ParticipantError("MAINNET_DISABLED", "transactional Mainnet entrypoints are absent from this build");
       const previousWalletId = this.wallet?.walletId ?? null;
       this.wallet = await this.adapter.connect(walletId);
+      await this.adapter.refreshState?.();
       if (previousWalletId !== this.wallet.walletId) {
         this.recoveryKey = generateRecoveryKit();
         this.backupGeneration = 0n;
@@ -88,6 +92,11 @@ export class ParticipantApplicationClient implements ParticipantApplication {
       this.emit();
       return this.wallet;
     } catch (cause) {
+      try { await this.adapter.disconnect(); } catch { /* cleanup must not hide the connection error */ }
+      this.wallet = null;
+      this.recoveryKey = generateRecoveryKit();
+      this.backupGeneration = 0n;
+      this.recoveryReady = false;
       this.status = "unavailable"; this.emit();
       if (cause instanceof ParticipantError) throw cause;
       throw new ParticipantError("OUTAGE", cause instanceof Error ? cause.message : "Preprod adapter is unavailable", true);
@@ -150,7 +159,8 @@ export class ParticipantApplicationClient implements ParticipantApplication {
 
   public async writeBackup(session: BackupSession, writerId: string): Promise<bigint> {
     if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a wallet before backing up");
-    this.backups.handoff(session, writerId, this.backupGeneration);
+    await this.backups.ensureAccount?.({ session, environment: "preprod", deploymentId: this.adapter.deploymentId });
+    await Promise.resolve(this.backups.handoff(session, writerId, this.backupGeneration));
     const record = await this.backups.write({ session, writerId, expectedGeneration: this.backupGeneration, key: this.recoveryKey, environment: "preprod", deploymentId: this.adapter.deploymentId, state: this.adapter.recoveryState() });
     this.backupGeneration = record.generation; this.emit(); return this.backupGeneration;
   }
@@ -167,13 +177,18 @@ export class ParticipantApplicationClient implements ParticipantApplication {
     if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "connect a supported Preprod wallet first");
     if (command === "contribute" && !this.recoveryReady) throw new ParticipantError("RECOVERY_NOT_READY", "complete the Recovery Kit export and restore drill before contributing");
     if (this.outage) throw new ParticipantError("OUTAGE", this.outage, true);
-    try { const receipt = await this.adapter.command(command, amount, this.sponsorship); this.emit(); return receipt; }
+    try {
+      const receipt = await this.adapter.command(command, amount, this.sponsorship);
+      if (this.adapter.refreshState) await this.adapter.refreshState().catch(() => undefined);
+      this.emit();
+      return receipt;
+    }
     catch (cause) { if (cause instanceof ParticipantError) throw cause; throw new ParticipantError("OUTAGE", cause instanceof Error ? cause.message : "Preprod transaction failed", true); }
   }
 
   private makeSnapshot(): ParticipantSnapshot {
     const account = this.adapter.account();
-    return { connection: this.status, wallet: this.wallet, deployment: { environment: "preprod", deploymentId: this.adapter.deploymentId, mainnetTransactionsEnabled: false }, privateBalanceMicroUnits: account.balanceMicroUnits, principalMicroUnits: account.principalMicroUnits, unclaimedPrizeMicroUnits: account.unclaimedPrizeMicroUnits, recoveryReady: this.recoveryReady, backupGeneration: this.backupGeneration, draw: this.adapter.draw(), sponsorship: this.sponsorship, outage: this.outage };
+    return { connection: this.status, wallet: this.wallet, deployment: { environment: "preprod", deploymentId: this.adapter.deploymentId, mainnetTransactionsEnabled: false }, stateStatus: this.adapter.stateStatus?.() ?? "available", stateMessage: this.adapter.stateMessage?.() ?? null, privateBalanceMicroUnits: account.balanceMicroUnits, principalMicroUnits: account.principalMicroUnits, unclaimedPrizeMicroUnits: account.unclaimedPrizeMicroUnits, recoveryReady: this.recoveryReady, backupGeneration: this.backupGeneration, draw: this.adapter.draw(), sponsorship: this.sponsorship, outage: this.outage };
   }
   private emit(): void { this.current = this.makeSnapshot(); for (const listener of this.listeners) listener(this.current); }
 }
@@ -219,8 +234,11 @@ export class DeterministicPreprodAdapter implements ParticipantAdapter {
     const transactionId = hashWords(domain("transaction/v1"), this.wallet.address as Hex, command, String(this.nowSeconds));
     return { transactionId, action: command, status: "finalized", finalizedAt: Number(this.nowSeconds), indexerVisible: true, ledgerConfirmed: true, sponsorship };
   }
-  public account(): { balanceMicroUnits: bigint; principalMicroUnits: bigint; twabSeconds: bigint; unclaimedPrizeMicroUnits: bigint } { if (!this.secret || !this.salt) return { balanceMicroUnits: 0n, principalMicroUnits: 0n, twabSeconds: 0n, unclaimedPrizeMicroUnits: 0n }; const account = this.pool.account(this.secret, this.salt, this.nowSeconds); const owner = deriveOwnerCommitment(this.secret, this.salt); return { balanceMicroUnits: this.pool.asset.balanceOf(owner), principalMicroUnits: account.principalMicroUnits, twabSeconds: account.twabSeconds, unclaimedPrizeMicroUnits: this.pool.unclaimedPrize(this.secret, this.salt) }; }
+  public account(): ParticipantAccountSnapshot { if (!this.secret || !this.salt) return { balanceMicroUnits: 0n, principalMicroUnits: 0n, twabSeconds: 0n, unclaimedPrizeMicroUnits: 0n }; const account = this.pool.account(this.secret, this.salt, this.nowSeconds); const owner = deriveOwnerCommitment(this.secret, this.salt); return { balanceMicroUnits: this.pool.asset.balanceOf(owner), principalMicroUnits: account.principalMicroUnits, twabSeconds: account.twabSeconds, unclaimedPrizeMicroUnits: this.pool.unclaimedPrize(this.secret, this.salt) }; }
   public draw(): ParticipantSnapshot["draw"] { return this.pool.snapshot(this.nowSeconds).draw; }
+  public stateStatus(): ParticipantStateStatus { return "available"; }
+  public stateMessage(): string | null { return null; }
+  public async refreshState(): Promise<void> { /* deterministic state is already local and current */ }
   public recoveryState(): unknown { return { walletId: this.wallet?.walletId ?? null, note: this.secret && this.salt ? this.pool.account(this.secret, this.salt, this.nowSeconds) : null }; }
   public restoreRecoveryState(state: unknown, generation: bigint): void { if (!this.wallet) throw new ParticipantError("AUTHORIZATION_REJECTED", "wallet is not connected"); if (!isRecordState(state) || state.walletId !== this.wallet.walletId) throw new Error("restored private state does not belong to the connected wallet"); this.restoredState = { state, generation }; }
   public restoredRecoveryState(): unknown { return this.restoredState?.state ?? null; }

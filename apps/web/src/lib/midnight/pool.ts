@@ -148,6 +148,11 @@ export class PrizePoolLedger {
     this.unclaimedAssetAccounts.delete(owner);
     this.asset.transfer(liabilityAccount, owner, amount);
     this.assertSolvent();
+    // A claimed draw is complete. Advance the schedule so the next
+    // permissionless draw cannot be blocked by the previous winner
+    // commitment; the yield adapter remains responsible for funding its next
+    // reserve before settlement.
+    this.draw = this.newDraw(this.draw.id + 1n, now);
     return amount;
   }
 

@@ -9,6 +9,7 @@ export const MIDNIGHT_PROVIDER_BOUNDARIES = createMidnightProviderBoundaries(
     network: MIDNIGHT_NETWORK_CONFIG.network,
     rpcUrl: MIDNIGHT_NETWORK_CONFIG.rpcUrl,
     indexerGraphqlUrl: MIDNIGHT_NETWORK_CONFIG.indexerGraphqlUrl,
+    zkConfigUrl: MIDNIGHT_NETWORK_CONFIG.zkConfigUrl,
     proofMode: MIDNIGHT_NETWORK_CONFIG.proofMode,
     allowRemoteProof: MIDNIGHT_NETWORK_CONFIG.allowRemoteProof,
   },

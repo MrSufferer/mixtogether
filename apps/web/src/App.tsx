@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { formatTokenAmount, parseTokenAmount } from "./lib/amount";
 import { MIDNIGHT_NETWORK_CONFIG, MIDNIGHT_PROVIDER_STATUS, PREPROD_DISCLOSURES } from "./lib/midnight/config";
-import { createParticipantApplication, DeterministicPreprodAdapter, ParticipantApplicationClient } from "./lib/midnight/application";
+import { createParticipantApplication, DeterministicPreprodAdapter } from "./lib/midnight/application";
 import { MidnightPreprodAdapter } from "./lib/midnight/preprod-adapter";
 import { serializeRecoveryBundle, parseRecoveryBundle } from "./lib/midnight/recovery";
 import { PROGRAM_CONSTANTS } from "./lib/midnight/constants";
@@ -80,7 +80,9 @@ export default function App() {
     void run("Withdrawing", () => application.withdraw(parsed));
   };
 
-  const action = nextDrawAction({ phase: snapshot.draw.phase, now: BigInt(Math.floor(clock / 1_000)), revealClosesAt: snapshot.draw.revealClosesAt, hasPrize: snapshot.unclaimedPrizeMicroUnits > 0n });
+  const connected = snapshot.connection === "connected";
+  const stateReady = connected && snapshot.stateStatus === "available";
+  const action = stateReady ? nextDrawAction({ phase: snapshot.draw.phase, now: BigInt(Math.floor(clock / 1_000)), revealClosesAt: snapshot.draw.revealClosesAt, hasPrize: snapshot.unclaimedPrizeMicroUnits > 0n }) : null;
   const timeLeft = snapshot.draw.revealClosesAt > 0n ? snapshot.draw.revealClosesAt - BigInt(Math.floor(clock / 1_000)) : 0n;
   const formattedTime = formatDuration(timeLeft > 0n ? timeLeft : 0n);
 
@@ -103,7 +105,6 @@ export default function App() {
     setNotice("Local archive invalidated for this deployment. Connect again to start a new participant session.");
   };
 
-  const connected = snapshot.connection === "connected";
   const busyNow = busy !== null;
   const networkLabel = `${snapshot.deployment.environment} · ${snapshot.deployment.deploymentId}`;
 
@@ -127,7 +128,7 @@ export default function App() {
             <p className="lede">Shroudly is a shielded Preprod proving ground for private time-weighted balances and threshold-selected prizes. Every displayed tMIX amount is valueless test currency.</p>
             <div className="trust-row"><span><LockKeyhole size={14} /> Private balances</span><span><Check size={14} /> Deterministic selection</span><span><EyeOff size={14} /> Selective disclosure</span></div>
           </div>
-          <div className="orb-stage" aria-label="Current prize reserve"><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Trophy size={28} /><span>Prize reserve</span><strong>{formatTokenAmount(snapshot.draw.prizeMicroUnits || PROGRAM_CONSTANTS.initialPrizeReserveMicroUnits)}</strong><small>tMIX</small></div><p><i /> simulated yield · {(PROGRAM_CONSTANTS.simulatedYieldPerDrawMicroUnits / 1_000_000n).toString()} tMIX / draw</p></div>
+          <div className="orb-stage" aria-label="Current prize reserve"><div className="orb-halo" /><div className="prize-orb"><div className="orb-glint" /><Trophy size={28} /><span>Prize reserve</span><strong>{stateReady ? formatTokenAmount(snapshot.draw.prizeMicroUnits) : "—"}</strong><small>tMIX</small></div><p><i /> {stateReady ? `simulated yield · ${(PROGRAM_CONSTANTS.simulatedYieldPerDrawMicroUnits / 1_000_000n).toString()} tMIX / draw` : "verified ledger state unavailable"}</p></div>
         </section>
 
         <div className="deployment-banner"><ShieldCheck size={16} /> <span><strong>{PREPROD_DISCLOSURES.identity}</strong> · {networkLabel} · Mainnet transactions are absent from this build.</span></div>
@@ -137,7 +138,7 @@ export default function App() {
           <div className="panel savings-panel">
             <div className="panel-heading"><div><p className="kicker">Participant journey</p><h2>Your private position</h2></div><LockKeyhole className="panel-icon" /></div>
             {!connected ? <div className="empty-state"><WalletCards size={27} /><h3>Connect a supported wallet</h3><p>Use the qualified desktop Chrome/Lace profile. The app never exposes raw provider objects to React.</p><button className="primary-button" onClick={connect} disabled={busyNow}>Connect to Preprod</button></div> : <>
-              <div className="balance-grid" aria-live="polite"><Balance label="Private wallet" value={snapshot.privateBalanceMicroUnits} /><Balance label="Time-Weighted Principal" value={snapshot.principalMicroUnits} /><Balance label="Unclaimed prize" value={snapshot.unclaimedPrizeMicroUnits} prize /><p className="privacy-note"><EyeOff size={14} /> Private state is encrypted locally.</p></div>
+              {stateReady ? <div className="balance-grid" aria-live="polite"><Balance label="Private wallet" value={snapshot.privateBalanceMicroUnits} /><Balance label="Time-Weighted Principal" value={snapshot.principalMicroUnits} /><Balance label="Unclaimed prize" value={snapshot.unclaimedPrizeMicroUnits} prize /><p className="privacy-note"><EyeOff size={14} /> Private state is encrypted locally.</p></div> : <div className="data-unavailable" role="status"><AlertTriangle size={20} /><div><strong>Verified ledger state unavailable</strong><p>{snapshot.stateMessage ?? "The application is waiting for a genuine Preprod state reader."}</p></div></div>}
               <div className="amount-control"><label htmlFor="amount">Amount (1–1,000 tMIX)</label><div className="amount-input"><input id="amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" /><span>tMIX</span></div><p>Six-decimal integer accounting · Disclosure Cohort requires five wallets.</p></div>
               <div className="sponsorship-choice" aria-label="Transaction fee choice">
                 <div><strong>Transaction fees</strong><p>Choose how DUST is supplied for eligible actions.</p></div>
@@ -148,17 +149,17 @@ export default function App() {
                 <small>A rejected sponsorship can fall back to wallet-funded DUST. If the sponsor times out before its provider result is known, wait for reconciliation before retrying the same action.</small>
               </div>
               <div className="journey">
-                <JourneyStep number="01" icon={<Gift size={18} />} title="Claim faucet allocation" detail="1,000 tMIX per 24-hour epoch" action="Claim" onClick={() => void run("Faucet claim", () => application.faucetClaim())} disabled={busyNow} />
-                <JourneyStep number="02" icon={<ArrowDownToLine size={18} />} title="Contribute to the pool" detail={snapshot.recoveryReady ? "Principal custody and TWAB start immediately" : "Export and restore your Recovery Kit first"} action="Contribute" onClick={contribute} disabled={busyNow || !snapshot.recoveryReady} />
-                <JourneyStep number="03" icon={<RefreshCw size={18} />} title="Withdraw principal" detail="Partial or full withdrawal, no prize reserve mixing" action="Withdraw" onClick={withdraw} disabled={busyNow || snapshot.principalMicroUnits === 0n} />
+                <JourneyStep number="01" icon={<Gift size={18} />} title="Claim faucet allocation" detail="1,000 tMIX per 24-hour epoch" action="Claim" onClick={() => void run("Faucet claim", () => application.faucetClaim())} disabled={busyNow || !stateReady} />
+                <JourneyStep number="02" icon={<ArrowDownToLine size={18} />} title="Contribute to the pool" detail={snapshot.recoveryReady ? "Principal custody and TWAB start immediately" : "Export and restore your Recovery Kit first"} action="Contribute" onClick={contribute} disabled={busyNow || !stateReady || !snapshot.recoveryReady} />
+                <JourneyStep number="03" icon={<RefreshCw size={18} />} title="Withdraw principal" detail="Partial or full withdrawal, no prize reserve mixing" action="Withdraw" onClick={withdraw} disabled={busyNow || !stateReady || snapshot.principalMicroUnits === 0n} />
               </div>
-              <div className="secondary-actions"><button onClick={() => void run("Yield checkpoint", () => application.checkpointYield())} disabled={busyNow}>Checkpoint yield</button><button onClick={() => setShowRecovery(true)} disabled={busyNow || snapshot.recoveryReady}>{snapshot.recoveryReady ? "Recovery Kit ready" : "Prepare Recovery Kit"}</button><button onClick={() => setShowRecovery((value) => !value)}>{showRecovery ? "Hide backup" : "Backup & restore"}</button><button onClick={resetArchive}>Reset archive</button></div>
+              <div className="secondary-actions"><button onClick={() => void run("Yield checkpoint", () => application.checkpointYield())} disabled={busyNow || !stateReady}>Checkpoint yield</button><button onClick={() => setShowRecovery(true)} disabled={busyNow || snapshot.recoveryReady}>{snapshot.recoveryReady ? "Recovery Kit ready" : "Prepare Recovery Kit"}</button><button onClick={() => setShowRecovery((value) => !value)}>{showRecovery ? "Hide backup" : "Backup & restore"}</button><button onClick={resetArchive}>Reset archive</button></div>
               {showRecovery && <div className="backup-box"><p><strong>Recovery Kit</strong> is a participant-held export. It binds encrypted state to {snapshot.deployment.deploymentId}; export and restore it before your first contribution. Retired deployments are read-only and cannot be imported.</p><button className="soft-button" onClick={() => void exportRecovery()} disabled={busyNow}><Download size={14} /> Export Recovery Kit</button><label className="soft-button file-button">Restore Recovery Kit<input type="file" accept="application/json" onChange={(event) => void restoreRecovery(event.target.files?.[0])} /></label>{backupText && <small>Recovery Kit staged for download. Restore that file to enable contribution.</small>}</div>}
             </>}
           </div>
 
           <aside className="side-column">
-            <div className="panel draw-panel"><div className="panel-heading"><div><p className="kicker">Threshold draw #{snapshot.draw.drawId.toString()}</p><h2>{snapshot.draw.phase === "finalized" ? "Winner selected" : "Next draw"}</h2></div><Clock3 className="panel-icon" /></div><div className="phase-track"><Phase label="Open" active={snapshot.draw.phase === "open"} /><Phase label="Commit" active={snapshot.draw.eligibleCommitments > 0} /><Phase label="Reveal" active={snapshot.draw.revealClosesAt > 0n && snapshot.draw.phase !== "finalized"} /><Phase label="Finalized" active={snapshot.draw.phase === "finalized"} /></div><div className="timer-row"><div><span>{snapshot.draw.phase === "finalized" ? "Claim window" : "Reveal deadline"}</span><strong>{formattedTime}</strong></div><Clock3 size={19} /></div><p className="draw-hint">2-of-3 canonical reveals · no fallback randomness · {snapshot.draw.disclosureCohortMet ? "cohort met" : "cohort pending"}</p>{action === "finalizeDraw" && <button className="primary-button full" onClick={() => void run("Finalize draw", () => application.finalizeDraw())} disabled={busyNow}>Finalize permissionlessly</button>}{action === "claimPrize" && <button className="primary-button full" onClick={() => void run("Claim prize", () => application.claimPrize())} disabled={busyNow}>Claim private prize</button>}<button className="soft-button full" onClick={() => localAdapter?.advanceTime(900n)} disabled={!localAdapter}>Advance deterministic clock 15m</button></div>
+            <div className="panel draw-panel"><div className="panel-heading"><div><p className="kicker">{stateReady ? `Threshold draw #${snapshot.draw.drawId.toString()}` : "Verified state unavailable"}</p><h2>{!stateReady ? "Awaiting verified state" : snapshot.draw.phase === "finalized" ? "Winner selected" : "Next draw"}</h2></div><Clock3 className="panel-icon" /></div><div className="phase-track"><Phase label="Open" active={stateReady && snapshot.draw.phase === "open"} /><Phase label="Commit" active={stateReady && snapshot.draw.eligibleCommitments > 0} /><Phase label="Reveal" active={stateReady && snapshot.draw.revealClosesAt > 0n && snapshot.draw.phase !== "finalized"} /><Phase label="Finalized" active={stateReady && snapshot.draw.phase === "finalized"} /></div><div className="timer-row"><div><span>{stateReady ? snapshot.draw.phase === "finalized" ? "Claim window" : "Reveal deadline" : "Ledger state"}</span><strong>{stateReady ? formattedTime : "—"}</strong></div><Clock3 size={19} /></div><p className="draw-hint">{stateReady ? `2-of-3 canonical reveals · no fallback randomness · ${snapshot.draw.disclosureCohortMet ? "cohort met" : "cohort pending"}` : snapshot.stateMessage ?? "Connect to a configured Preprod deployment to read draw state."}</p>{action === "finalizeDraw" && <button className="primary-button full" onClick={() => void run("Finalize draw", () => application.finalizeDraw())} disabled={busyNow}>Finalize permissionlessly</button>}{action === "claimPrize" && <button className="primary-button full" onClick={() => void run("Claim prize", () => application.claimPrize())} disabled={busyNow}>Claim private prize</button>}<button className="soft-button full" onClick={() => localAdapter?.advanceTime(900n)} disabled={!localAdapter || !stateReady}>Advance deterministic clock 15m</button></div>
             <div className="panel panel-midnight"><div className="panel-heading"><div><p className="kicker">Provider boundary</p><h2>Midnight profile</h2></div><ShieldCheck className="panel-icon" /></div><p className="midnight-copy">Official wallet, proof, public-data, private-state, ZK-config, and logging providers are composed behind one deep module.</p><div className="provider-status-grid">{MIDNIGHT_PROVIDER_STATUS.map(([name, status]) => <span key={name}><small>{name}</small><strong>{status}</strong></span>)}</div></div>
           </aside>
         </section>

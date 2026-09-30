@@ -1,26 +1,30 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { handleSponsorRequest } from "./http";
-import { SponsorService } from "./service";
+import { handleSponsorRequest } from "./http.ts";
+import { createSponsorRuntimeFromEnvironment } from "./runtime.ts";
 
 /**
- * Minimal Render HTTP entrypoint. Provider-backed authentication and submit
- * functions are injected by the deployment wrapper; this default remains
- * fail-closed and is useful for health checks only.
+ * Render HTTP entrypoint. The service is constructed only from server-side
+ * provider configuration. A missing provider is unhealthy so Render cannot
+ * route production traffic to an inert sponsor process.
  */
-const service = new SponsorService();
+const runtime = createSponsorRuntimeFromEnvironment();
 const port = Number.parseInt(process.env.PORT ?? "8787", 10);
 
 const server = createServer(async (incoming: IncomingMessage, outgoing: ServerResponse) => {
   if (incoming.url === "/healthz" && incoming.method === "GET") {
-    outgoing.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    outgoing.end(JSON.stringify({ ok: true, service: "shroudly-sponsor", environment: "preprod" }));
+    outgoing.writeHead(runtime.ready ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
+    outgoing.end(JSON.stringify({ ok: runtime.ready, ready: runtime.ready, service: "shroudly-sponsor", environment: "preprod", missing: runtime.ready ? [] : ["provider configuration"] }));
     return;
   }
-  const body = await readBody(incoming);
+  let body: Buffer;
+  try { body = await readBody(incoming); }
+  catch { writeError(outgoing, 413, "request body is too large or unreadable"); return; }
   const headers = new Headers();
   for (const [name, value] of Object.entries(incoming.headers)) if (typeof value === "string") headers.set(name, value);
   const request = new Request(`http://${incoming.headers.host ?? "localhost"}${incoming.url ?? "/"}`, { method: incoming.method ?? "GET", headers, body: incoming.method === "GET" || incoming.method === "HEAD" ? undefined : body.toString("utf8") });
-  const response = await handleSponsorRequest(request, service);
+  let response: Response;
+  try { response = await handleSponsorRequest(request, runtime.service); }
+  catch { writeError(outgoing, 503, "sponsor service is unavailable"); return; }
   outgoing.writeHead(response.status, { "content-type": response.headers.get("content-type") ?? "application/json", "cache-control": response.headers.get("cache-control") ?? "no-store" });
   outgoing.end(Buffer.from(await response.arrayBuffer()));
 });
@@ -31,8 +35,19 @@ function readBody(incoming: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    incoming.on("data", (chunk: Buffer) => { size += chunk.length; if (size > 1_000_000) { reject(new Error("request body too large")); incoming.destroy(); return; } chunks.push(chunk); });
-    incoming.on("end", () => resolve(Buffer.concat(chunks)));
-    incoming.on("error", reject);
+    let settled = false;
+    incoming.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > 1_000_000) { settled = true; reject(new Error("request body too large")); incoming.destroy(); return; }
+      chunks.push(chunk);
+    });
+    incoming.on("end", () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks)); } });
+    incoming.on("error", (cause) => { if (!settled) { settled = true; reject(cause); } });
   });
+}
+
+function writeError(outgoing: ServerResponse, status: number, message: string): void {
+  outgoing.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+  outgoing.end(JSON.stringify({ ok: false, code: "UPSTREAM_REJECTED", message, retryable: true, fallback: "participant-funded-dust" }));
 }

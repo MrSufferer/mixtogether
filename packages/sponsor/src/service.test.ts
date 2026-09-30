@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign as signBytes } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { SponsorService, sponsorAuthorizationMessage, type FinalizedSponsorSubmission, type SponsorRequest, type SponsorServiceOptions } from "./service";
+import { InMemorySponsorStateStore } from "./state";
 
 const NOW = 1_800_000_000_000;
 const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -78,9 +79,30 @@ describe("DUST sponsor policy boundary", () => {
     expect(submissions).toBe(1);
   });
 
+  test("keeps a local reconciliation marker when a timed-out provider later rejects", async () => {
+    let submissions = 0;
+    let rejectSubmission!: (reason?: unknown) => void;
+    const pending = new Promise<FinalizedSponsorSubmission>((_resolve, reject) => { rejectSubmission = reject; });
+    const service = new SponsorService(serviceOptions({ timeoutMs: 5, submit: async (_request, _dustCap, signal) => { submissions += 1; signal?.addEventListener("abort", () => undefined); return pending; } }));
+
+    await expect(service.handle("token", request())).resolves.toMatchObject({ ok: false, code: "TIMEOUT", retryable: false });
+    rejectSubmission(new Error("provider rejected after timeout"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(service.handle("token", request())).resolves.toMatchObject({ ok: false, code: "TIMEOUT", retryable: false });
+    expect(submissions).toBe(1);
+  });
+
   test("keeps an upstream rejection retryable for wallet-funded fallback", async () => {
     const service = new SponsorService(serviceOptions({ submit: async () => ({ transactionId: "", networkFinalized: false, indexerVisible: false, ledgerConfirmed: false }) }));
     await expect(service.handle("token", request())).resolves.toMatchObject({ ok: false, code: "UPSTREAM_REJECTED", retryable: true, fallback: "participant-funded-dust" });
+  });
+
+  test("contains asynchronous upstream rejection and preserves reconciliation safety", async () => {
+    let submissions = 0;
+    const service = new SponsorService(serviceOptions({ submit: async () => { submissions += 1; throw new Error("provider unavailable"); } }));
+    await expect(service.handle("token", request())).resolves.toMatchObject({ ok: false, code: "UPSTREAM_REJECTED", retryable: true, fallback: "participant-funded-dust" });
+    await expect(service.handle("token", request())).resolves.toMatchObject({ ok: false, code: "TIMEOUT", retryable: false });
+    expect(submissions).toBe(1);
   });
 
   test("cryptographically verifies participant authorization before submission", async () => {
@@ -104,5 +126,48 @@ describe("DUST sponsor policy boundary", () => {
     expect(first).toMatchObject({ ok: true });
     expect(second).toEqual(first);
     expect(submissions).toBe(1);
+  });
+
+  test("replays a completed result after the service is restarted", async () => {
+    const stateStore = new InMemorySponsorStateStore();
+    let submissions = 0;
+    const options = serviceOptions({
+      stateStore,
+      submit: async () => {
+        submissions += 1;
+        return { transactionId: `0x${"e".repeat(64)}`, networkFinalized: true, indexerVisible: true, ledgerConfirmed: true };
+      },
+    });
+    const first = await new SponsorService(options).handle("token", request());
+    const afterRestart = await new SponsorService(options).handle("token", request());
+
+    expect(afterRestart).toEqual(first);
+    expect(submissions).toBe(1);
+  });
+
+  test("persists an uncertain timeout and reconciles a late finalized result", async () => {
+    const stateStore = new InMemorySponsorStateStore();
+    let submissions = 0;
+    let resolveSubmission!: (result: FinalizedSponsorSubmission) => void;
+    const pending = new Promise<FinalizedSponsorSubmission>((resolve) => { resolveSubmission = resolve; });
+    const options = serviceOptions({ stateStore, timeoutMs: 5, submit: async () => { submissions += 1; return pending; } });
+
+    await expect(new SponsorService(options).handle("token", request())).resolves.toMatchObject({ code: "TIMEOUT", retryable: false });
+    await expect(new SponsorService(options).handle("token", request())).resolves.toMatchObject({ code: "TIMEOUT", retryable: false });
+    expect(submissions).toBe(1);
+
+    resolveSubmission({ transactionId: `0x${"f".repeat(64)}`, networkFinalized: true, indexerVisible: true, ledgerConfirmed: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(new SponsorService(options).handle("token", request())).resolves.toMatchObject({ ok: true, transaction: { transactionId: `0x${"f".repeat(64)}` } });
+  });
+
+  test("atomically allows only one process to claim an uncertain submission", async () => {
+    const stateStore = new InMemorySponsorStateStore();
+    const claims = await Promise.all([
+      stateStore.claimUncertain("account-1:action-1", { accountId: "account-1", authorizationDigest: "digest" }),
+      stateStore.claimUncertain("account-1:action-1", { accountId: "account-1", authorizationDigest: "digest" }),
+    ]);
+    expect(claims.filter((claim) => claim.acquired)).toHaveLength(1);
+    expect(claims.filter((claim) => !claim.acquired)).toHaveLength(1);
   });
 });

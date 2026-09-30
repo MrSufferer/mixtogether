@@ -9,7 +9,7 @@ const sourceNames = ["TmixAsset", "RandomnessThreshold", "YieldAdapter", "PrizeP
 const sourcePaths = sourceNames.map((name) => resolve(root, `midnight/${name}.compact`));
 const managedRoot = resolve(root, "midnight/managed");
 const infoPaths = sourceNames.map((name) => resolve(managedRoot, name.replace(/[A-Z]/g, (letter, index) => `${index ? "-" : ""}${letter.toLowerCase()}`), "compiler/contract-info.json"));
-const sourceMarkers = ["Shroudly", "supply cap", "threshold-only", "simulated-yield", "Disclosure Cohort", "claimNullifier", "deployerActive"];
+const sourceMarkers = ["Shroudly", "supply cap", "threshold-only", "simulated-yield", "Disclosure Cohort", "claimNullifier", "deployerActive", "mintShieldedToken", "seedPrizeReserve", "receiveShielded", "sendShielded", "selection_bits", "participantTwab", "rolloverSubthreshold"];
 const missingSources = sourcePaths.filter((path) => !existsSync(path));
 const infos = infoPaths.filter((path) => existsSync(path)).map((path) => JSON.parse(readFileSync(path, "utf8")));
 const allSources = sourcePaths.filter((path) => existsSync(path)).map((path) => readFileSync(path, "utf8")).join("\n");
@@ -36,6 +36,10 @@ const gates = {
   compactCompile,
   zkKeysGenerated,
   compatibilityMatch,
+  contractIntegrationAttested: false,
+  custodyMovementAttested: false,
+  winnerSelectionAttested: false,
+  faucetTimingAttested: false,
   propertyMatrix: false,
   adversarialReplayMatrix: false,
   scaleMatrix: false,
