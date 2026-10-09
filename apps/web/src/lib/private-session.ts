@@ -1,8 +1,6 @@
-import type { QueryClient } from "@tanstack/react-query";
-import { zamaQueryKeys } from "@zama-fhe/sdk/query";
-
-/** Remove only wallet-sensitive Zama query data, leaving public chain reads intact. */
-export function clearPrivateQueryCache(queryClient: QueryClient) {
-  queryClient.removeQueries({ queryKey: zamaQueryKeys.decryption.all });
-  queryClient.removeQueries({ queryKey: zamaQueryKeys.hasPermit.all });
+/** Remove wallet-private snapshots without touching public draw data. */
+export function clearPrivateQueryCache(store: { clear?: () => void } | Map<string, unknown>): void {
+  if (store instanceof Map) {
+    for (const key of store.keys()) if (key.startsWith("private:")) store.delete(key);
+  } else store.clear?.();
 }

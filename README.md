@@ -1,155 +1,92 @@
-# MixTogether
+# Shroudly
 
 **Private savings. Provable chances.**
 
-MixTogether is a confidential prize-savings pool for Ethereum Sepolia. Savers keep their principal withdrawable while Zama FHE encrypts balances, time-weighted chances, randomness, the prize reserve, the selected interval, and winnings.
+Shroudly is a Midnight Preprod proving ground for a shielded `tMIX` prize pool. Contributions, Time-Weighted Principal, threshold randomness, winner ownership, and claims are implemented behind a single `ParticipantApplication` facade. `tMIX` is six-decimal integer test currency with no monetary value.
 
-> **Experimental and unaudited.** MixTogether uses mock testnet assets, has no monetary value, and is not ready for production deposits. FHE hides amounts and draw outcomes; it does not hide wallet participation or transaction timing.
+> Preprod is valueless test infrastructure. It can be reset, is not a Mainnet trust claim, and is qualified only for the supported desktop Chrome/Lace profile. Mainnet transactional entrypoints are absent from this release.
 
-[Open the Vercel preview](https://web-e9stkxv3e-gadillacers-projects.vercel.app) · [Read the architecture](docs/architecture.md) · [Review security assumptions](SECURITY.md)
+## Fixed Preprod profile
 
-Deployed Sepolia pool contract: [`0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`](https://sepolia.etherscan.io/address/0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97).
-
-![MixTogether desktop dashboard](output/playwright/mixtogether-desktop.png)
-
-## How it works
-
-1. Mint mock USDC from the official Sepolia faucet contract.
-2. Approve the exact public amount and wrap it into confidential cUSDC.
-3. Transfer cUSDC into the pool without revealing the deposit amount.
-4. Earn encrypted ticket weight from quantized principal times eligible seconds.
-5. Let any wallet advance the bounded draw in eight-saver batches.
-6. Explicitly sign an EIP-712 permit to reveal only your cUSDC, principal, and winnings in the browser.
-7. Claim winnings, withdraw principal at any draw phase, or request an asynchronous public unwrap.
-
-One completed draw awards up to 10 cUSDC from the separate prize reserve. Principal never funds prizes.
-
-## Fixed v1 parameters
-
-| Parameter | Value |
+| Constant | Value |
 | --- | --- |
-| Chain | Ethereum Sepolia (`11155111`) |
-| Epoch | 5 minutes |
-| Winner | 1 per completed draw |
-| Nominal prize | 10 cUSDC |
-| Saver capacity | 64 registered wallets |
-| Batch size | 8 occupied slots |
-| Ticket unit | 0.1 cUSDC-second |
-| Weight | `floor(principal / 100_000) × eligibleSeconds` |
+| Supply cap | 10,000,000 `tMIX` |
+| Faucet | 1,000 `tMIX` per 24-hour epoch |
+| Initial Prize Reserve | 1,000,000 `tMIX` |
+| Simulated Yield | At most 100 `tMIX` per completed 15-minute draw |
+| Contribution | 1–1,000 `tMIX` |
+| Disclosure Cohort | Five wallets |
+| Randomness | Three contributors, two-of-three reveals, no fallback |
+| Full settlement pause | At most 24 hours without renewal |
+| Sponsor timeout | Eight seconds |
 
-Official Sepolia contracts:
+The accepted compatibility profile is Compact CLI/devtools 0.5.2, Compact language 0.23.0, compiler 0.31.1, runtime 0.16.0, Midnight.js 4.1.1, Wallet SDK 1.2.0, DApp Connector 4.0.1, node 1.0.2, indexer 4.3.3-hotfix, and proof server 8.1.0. See [`midnight/version-profile.json`](midnight/version-profile.json).
 
-- MixTogetherPool: [`0x2971…bC97`](https://sepolia.etherscan.io/address/0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97)
-- cUSDC: [`0x7c5B…3639`](https://sepolia.etherscan.io/address/0x7c5BF43B851c1dff1a4feE8dB225b87f2C223639)
-- Mock USDC: [`0x9b5C…DfF`](https://sepolia.etherscan.io/address/0x9b5Cd13b8eFbB58Dc25A05CF411D8056058aDFfF)
-- Wrapper registry: [`0x2f07…128e`](https://sepolia.etherscan.io/address/0x2f0750Bbb0A246059d80e94c454586a7F27a128e)
-
-Validation confirmed deployed code, six decimals, a 1:1 wrapper rate, the underlying relationship, both registry directions, registry validity, and a permissionless static faucet mint.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  A[Sepolia wallet] --> B[Vite + React dashboard]
-  B --> C[Zama React SDK]
-  B --> D[wagmi + viem]
-  D --> E[Mock USDC]
-  C --> F[Official cUSDC wrapper]
-  F -->|confidentialTransferAndCall| G[MixTogetherPool]
-  H[Permissionless caller] --> G
-  C --> I[Zama relayer and KMS]
-  G --> J[FHEVM coprocessor]
-```
-
-The non-upgradeable pool partitions encrypted liabilities:
+## Repository map
 
 ```text
-pool cUSDC balance >= aggregate principal + prize reserve + unclaimed winnings
-```
-
-`OPEN → ACCRUE → RANDOMIZE → SELECT → OPEN` is permissionless. Accrual and selection process at most eight occupied slots per transaction. Selection conditionally credits one encrypted interval while refreshing every visited saver’s winnings handle so storage activity does not reveal the winner.
-
-## Privacy boundary
-
-| Encrypted | Public |
-| --- | --- |
-| cUSDC balance and pool principal | Participating wallet addresses |
-| Saver weights, total weight, and exact pool size | Registry occupancy and draw progress |
-| Odds, random word, ticket, and selected interval | Transaction timing and callers |
-| Prize reserve and winnings | Nominal 10 cUSDC award |
-| Winner result | Shield and unshield amounts |
-
-A zero-value encrypted claim is valid. A claim transaction is therefore not cryptographic proof of a win, though timing correlations remain possible. Shielding and unshielding cross a public boundary, and MixTogether does not provide wallet anonymity.
-
-## Repository
-
-```text
-apps/web/              Vite React dashboard, unit tests, Playwright tests
-packages/contracts/    Hardhat V2 FHEVM contract, tests, deployer, keeper
-docs/ai/               Requirements, design, implementation, test, release records
-docs/                   Architecture and submission collateral
-output/playwright/      Reviewed desktop and mobile screenshots
+apps/web/               Shroudly participant application and Playwright journeys
+packages/contracts/     Compact component metadata and reference tests
+packages/sponsor/       Stateless DUST Sponsor Service HTTP boundary
+packages/randomness-signer/  Contributor-scoped Preprod randomness boundary
+midnight/               Four Compact contracts and generated build inputs
+scripts/                Compile, profile, health, reset, and evidence commands
+docs/operations/        Runbook, incident templates, and evidence conventions
+docs/legacy/            Noncanonical historical preview and narrative only
 ```
 
 ## Local development
 
-Requirements: Node.js 22+, pnpm 8.15.9, and a browser wallet configured for Sepolia.
+Requirements: Node.js 22+, pnpm 8.15.9, and the pinned Compact toolchain.
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm check
+pnpm midnight:compile
+pnpm midnight:profile
 pnpm build
 pnpm dev
 ```
 
-Copy `.env.example` to `.env` for browser-safe public configuration. Never put private keys in `VITE_*` variables. Without `VITE_POOL_ADDRESS`, the app enters a safe preview mode and disables all transactions.
+Copy [`.env.example`](.env.example) to a local ignored environment file. Only the `VITE_SHROUDLY_*` names are browser-safe; credentials remain in provider secret stores. There is no runtime network switch.
 
-Run browser tests after installing the pinned browser once:
+Run deterministic unit and browser journeys:
 
 ```bash
-pnpm --filter @mixtogether/web exec playwright install chromium
+pnpm test:web
+pnpm test:sponsor
 pnpm test:e2e
 ```
 
-## Sepolia validation and deployment
+Development builds use the deterministic adapter for repeatable local journeys. A production build composes the genuine DApp Connector boundary and requires a Lace wallet discovered at `window.midnight[walletId]`.
 
-Operator configuration is managed via the gitignored repo-root `.env` file (copied from `.env.example`):
+## Operations and evidence
 
-```bash
-cp .env.example .env
-# Fill DEPLOYER_PRIVATE_KEY with your funded Sepolia hex private key.
-# Optionally configure ETHERSCAN_API_KEY for contract verification and SEPOLIA_RPC_URL.
-# Never prefix private keys with VITE_ or commit .env.
-```
-
-Hardhat `vars` is also supported as an optional non-secret fallback for RPC or API keys:
+The [release runbook](docs/operations/runbook.md) starts from empty provider accounts and documents MFA, permissions, safe variable names, key rotation, migrations, handoff, outage response, and evidence validation. Automation commands are idempotent:
 
 ```bash
-pnpm validate:sepolia
-pnpm deploy:sepolia
-```
-`GUARDIAN_ADDRESS` may be supplied as a server-side environment variable; otherwise the deployer becomes guardian. The deploy script re-runs token validation, writes `deployments/sepolia/MixTogetherPool.json`, and verifies on Etherscan when an API key is available.
-
-After deployment, set `VITE_POOL_ADDRESS`, rebuild the web app, fund the reserve through cUSDC `confidentialTransferAndCall` with `abi.encode(uint8(2))`, and complete the two-wallet/eight-saver smoke checklist before treating the demo as transaction-ready.
-
-Run one keeper step or watch continuously:
-
-```bash
-SEPOLIA_RPC_URL=… POOL_ADDRESS=… KEEPER_PRIVATE_KEY=… pnpm keeper
-SEPOLIA_RPC_URL=… POOL_ADDRESS=… KEEPER_PRIVATE_KEY=… pnpm keeper -- --watch
+node scripts/preprod-health.mjs
+# Run each command in the isolated contributor runner that owns its seed.
+node scripts/preprod-randomness.mjs commit --draw <draw-id> --deployment <deployment-id> --contributor <render|github-actions|offline-maintainer>
+node scripts/preprod-randomness.mjs reveal --draw <draw-id> --deployment <deployment-id> --contributor <render|github-actions|offline-maintainer>
+node scripts/preprod-evidence.mjs --out evidence/preprod
+node scripts/reset-preprod.mjs --deployment <deployment-id>
+# Provision the isolated Stage 7 Render services (RENDER_API_KEY is read from
+# the process environment; no credential is printed).
+node scripts/deploy-render-stage7.mjs
 ```
 
-## Verification status
+Evidence is sanitized, hashed, and tied to the immutable source revision. A transaction is successful only after network finality, indexer visibility, and a fresh ledger-state query. Qualified evidence additionally requires an externally signed attestation from the verifier fingerprint pinned in the reviewed Compatibility Profile; a caller-supplied key alone can never qualify a bundle. Five isolated wallets and the supported Lace gate are human-operated release checks; no automated wallet bridge is bundled.
 
-- Contract state-machine, callback, ACL, withdrawal, prize, selection, pruning, guardian rotation, and eight-saver batch tests pass locally.
-- Web domain tests and four desktop/mobile Playwright checks pass.
-- TypeScript checks, Solidity compilation, and the production Vite build pass.
-- The production dependency audit reports no known vulnerabilities; pinned Hardhat/Zama development tooling retains documented transitive advisories.
-- The Vercel preview is live with COOP `same-origin` and COEP `require-corp`.
-- Sepolia deployment is live: pool contract deployed at `0x29713643C62C6743a5BF68e39Ac1De8EAEC0bC97`, funded with 100 cUSDC prize reserve, and verified on chain.
-- GitHub source repository is published publicly at <https://github.com/MrSufferer/mixtogether> with passing CI.
+Every build exposes the non-secret profile at [`/build-profile.json`](apps/web/public/build-profile.json). It includes the contract IDs, source/artifact fingerprints, endpoints, compatibility versions, fixed constants, governance/deployer status, and a SHA-256 snapshot. Provider credentials and wallet material are never emitted.
 
-See [the submission checklist](docs/submission-checklist.md) for the exact release blockers and [the demo script](docs/demo-video-script.md) for a sub-three-minute walkthrough.
+## Mainnet status
+
+The repository encodes Mainnet interfaces and timings for future review, but disables all transactional Mainnet entrypoints. Legal/name clearance, independent security review, a real shielded asset and audited yield strategy, independent randomness and governance, paid service validation, deployer removal, and canary approval remain `ready-for-human` gates.
+
+## Security
+
+Read [`SECURITY.md`](SECURITY.md) and the accepted ADRs in [`docs/adr`](docs/adr). Do not commit keys, recovery material, decrypted balances, provider tokens, or raw evidence.
 
 ## License
 

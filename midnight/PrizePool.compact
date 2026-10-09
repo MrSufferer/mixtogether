@@ -1,0 +1,485 @@
+pragma language_version >= 0.22 && <= 0.23;
+
+import CompactStandardLibrary;
+
+// The pool accepts only shielded tMIX coins and private account notes.
+// Component pins are public configuration, while note ownership stays private.
+// The asset color is an immutable deployment binding calculated from the
+// deployed TmixAsset address and its token domain. Every receive/spend path
+// checks it before changing the pool's accounting state.
+//
+// Compact 0.31.1 does not expose contract-to-contract calls, so the pool
+// cannot invoke RandomnessThreshold or YieldAdapter itself. The deployment
+// workflow therefore pins those component IDs and the runtime must submit the
+// independently finalized aggregate plus the reviewed custody inputs. Winner
+// selection itself is nevertheless performed by this circuit from the pinned
+// aggregate, the five committed participants, their continuous TWAB values,
+// and a witness constrained to the hash-derived selection bits.
+export ledger assetComponent: Bytes<32>;
+export ledger assetTokenColor: Bytes<32>;
+export ledger randomnessComponent: Bytes<32>;
+export ledger yieldComponent: Bytes<32>;
+export ledger disclosureCohort: Uint<64>;
+// Exact aggregate values remain private ledger state.  Only the boundary
+// commitment below is exported once the Disclosure Cohort gate is met.
+ledger principalReserve: Uint<64>;
+ledger totalShareTwab: Uint<64>;
+ledger participantCommitments: Set<Bytes<32>>;
+ledger eligibleParticipantCommitments: Set<Bytes<32>>;
+ledger principalBalances: Map<Bytes<32>, Uint<64>>;
+ledger participantTwab: Map<Bytes<32>, Uint<64>>;
+ledger participantUpdatedAt: Map<Bytes<32>, Uint<64>>;
+ledger drawWeightSnapshots: Map<Bytes<32>, Uint<64>>;
+ledger drawWeightSnapshotKeys: Set<Bytes<32>>;
+ledger unclaimedPrizes: Map<Bytes<32>, Uint<64>>;
+export ledger participantCount: Uint<64>;
+export ledger aggregateDisclosure: Bytes<32>;
+export ledger drawId: Uint<64>;
+export ledger drawCutoff: Uint<64>;
+export ledger winningCommitment: Bytes<32>;
+export ledger prizeReserve: Uint<64>;
+export ledger paidOutPrizes: Uint<64>;
+export ledger claimDeadline: Uint<64>;
+export ledger claimNullifiers: Set<Bytes<32>>;
+export ledger contributionPaused: Boolean;
+export ledger withdrawalPaused: Boolean;
+export ledger settlementPaused: Boolean;
+export ledger deployerActive: Boolean;
+export ledger submissionLocked: Boolean;
+export ledger deployerRemovalDeadline: Uint<64>;
+export ledger deployerAuthority: Bytes<32>;
+export ledger governanceOneAuthority: Bytes<32>;
+export ledger governanceTwoAuthority: Bytes<32>;
+export ledger governanceThreeAuthority: Bytes<32>;
+
+witness deployer_secret(): Bytes<32>;
+witness governance_one_secret(): Bytes<32>;
+witness governance_two_secret(): Bytes<32>;
+witness governance_three_secret(): Bytes<32>;
+witness participant_secret(): Bytes<32>;
+witness participant_salt(): Bytes<32>;
+witness participant_public_key(): ZswapCoinPublicKey;
+witness participant_coin(): ShieldedCoinInfo;
+witness participant_spendable_coin(): QualifiedShieldedCoinInfo;
+witness reserve_coin(): ShieldedCoinInfo;
+witness selection_bits(): Vector<64, Boolean>;
+
+constructor(asset: Bytes<32>, assetColor: Bytes<32>, randomness: Bytes<32>, yieldAdapter: Bytes<32>) {
+  assetComponent = disclose(asset);
+  assert(assetColor != pad(32, ""), "asset token color is required");
+  assetTokenColor = disclose(assetColor);
+  randomnessComponent = disclose(randomness);
+  yieldComponent = disclose(yieldAdapter);
+  disclosureCohort = 5;
+  principalReserve = 0;
+  totalShareTwab = 0;
+  participantCount = 0;
+  aggregateDisclosure = pad(32, "");
+  drawId = 1;
+  drawCutoff = 900;
+  winningCommitment = pad(32, "");
+  prizeReserve = 1000000000000;
+  paidOutPrizes = 0;
+  claimDeadline = 0;
+  contributionPaused = false;
+  withdrawalPaused = false;
+  settlementPaused = false;
+  deployerActive = true;
+  submissionLocked = false;
+  deployerRemovalDeadline = 86400;
+  deployerAuthority = disclose(authorityCommitment(deployer_secret()));
+  governanceOneAuthority = disclose(authorityCommitment(governance_one_secret()));
+  governanceTwoAuthority = disclose(authorityCommitment(governance_two_secret()));
+  governanceThreeAuthority = disclose(authorityCommitment(governance_three_secret()));
+}
+
+export pure circuit authorityCommitment(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/pool-authority/v1"), secret]);
+}
+
+export pure circuit ownerCommitment(secret: Bytes<32>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>]>([pad(32, "Shroudly/owner/v1"), secret, salt]);
+}
+
+export pure circuit accountNoteCommitment(owner: Bytes<32>, shares: Uint<64>, twab: Uint<64>, updatedAt: Uint<64>, nonce: Uint<64>, salt: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>, Uint<64>, Uint<64>, Uint<64>, Bytes<32>]>([pad(32, "Shroudly/account/v1"), owner, shares, twab, updatedAt, nonce, salt]);
+}
+
+export pure circuit winningCommitmentFor(owner: Bytes<32>, draw: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/winning/v1"), owner, draw]);
+}
+
+export pure circuit claimNullifier(owner: Bytes<32>, draw: Uint<64>, winning: Bytes<32>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>, Bytes<32>]>([pad(32, "Shroudly/claim/v1"), owner, draw, winning]);
+}
+
+pure circuit drawWeightKey(owner: Bytes<32>, draw: Uint<64>): Bytes<32> {
+  return persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([pad(32, "Shroudly/draw-weight/v1"), owner, draw]);
+}
+
+// The hash is represented as a witness bit vector and constrained back to the
+// Compact field value. Repeated doubling with conditional subtraction gives a
+// modulo operation without relying on compiler/runtime division intrinsics.
+pure circuit reduceSelectionStep(remainder: Uint<64>, bit: Boolean, total: Uint<64>): Uint<64> {
+  const next = (remainder * 2 + (bit as Uint<64>)) as Uint<64>;
+  if (disclose(next >= total)) {
+    return (next - total) as Uint<64>;
+  }
+  return next;
+}
+
+pure circuit selectionIndex(randomness: Bytes<32>, draw: Uint<64>, total: Uint<64>, bits: Vector<64, Boolean>): Uint<64> {
+  const value = persistentHash<[Bytes<32>, Uint<64>]>([randomness, draw]) as Uint<64>;
+  const packed =
+    (bits[0] as Uint<64>) * 1 +
+    (bits[1] as Uint<64>) * 2 +
+    (bits[2] as Uint<64>) * 4 +
+    (bits[3] as Uint<64>) * 8 +
+    (bits[4] as Uint<64>) * 16 +
+    (bits[5] as Uint<64>) * 32 +
+    (bits[6] as Uint<64>) * 64 +
+    (bits[7] as Uint<64>) * 128 +
+    (bits[8] as Uint<64>) * 256 +
+    (bits[9] as Uint<64>) * 512 +
+    (bits[10] as Uint<64>) * 1024 +
+    (bits[11] as Uint<64>) * 2048 +
+    (bits[12] as Uint<64>) * 4096 +
+    (bits[13] as Uint<64>) * 8192 +
+    (bits[14] as Uint<64>) * 16384 +
+    (bits[15] as Uint<64>) * 32768 +
+    (bits[16] as Uint<64>) * 65536 +
+    (bits[17] as Uint<64>) * 131072 +
+    (bits[18] as Uint<64>) * 262144 +
+    (bits[19] as Uint<64>) * 524288 +
+    (bits[20] as Uint<64>) * 1048576 +
+    (bits[21] as Uint<64>) * 2097152 +
+    (bits[22] as Uint<64>) * 4194304 +
+    (bits[23] as Uint<64>) * 8388608 +
+    (bits[24] as Uint<64>) * 16777216 +
+    (bits[25] as Uint<64>) * 33554432 +
+    (bits[26] as Uint<64>) * 67108864 +
+    (bits[27] as Uint<64>) * 134217728 +
+    (bits[28] as Uint<64>) * 268435456 +
+    (bits[29] as Uint<64>) * 536870912 +
+    (bits[30] as Uint<64>) * 1073741824 +
+    (bits[31] as Uint<64>) * 2147483648 +
+    (bits[32] as Uint<64>) * 4294967296 +
+    (bits[33] as Uint<64>) * 8589934592 +
+    (bits[34] as Uint<64>) * 17179869184 +
+    (bits[35] as Uint<64>) * 34359738368 +
+    (bits[36] as Uint<64>) * 68719476736 +
+    (bits[37] as Uint<64>) * 137438953472 +
+    (bits[38] as Uint<64>) * 274877906944 +
+    (bits[39] as Uint<64>) * 549755813888 +
+    (bits[40] as Uint<64>) * 1099511627776 +
+    (bits[41] as Uint<64>) * 2199023255552 +
+    (bits[42] as Uint<64>) * 4398046511104 +
+    (bits[43] as Uint<64>) * 8796093022208 +
+    (bits[44] as Uint<64>) * 17592186044416 +
+    (bits[45] as Uint<64>) * 35184372088832 +
+    (bits[46] as Uint<64>) * 70368744177664 +
+    (bits[47] as Uint<64>) * 140737488355328 +
+    (bits[48] as Uint<64>) * 281474976710656 +
+    (bits[49] as Uint<64>) * 562949953421312 +
+    (bits[50] as Uint<64>) * 1125899906842624 +
+    (bits[51] as Uint<64>) * 2251799813685248 +
+    (bits[52] as Uint<64>) * 4503599627370496 +
+    (bits[53] as Uint<64>) * 9007199254740992 +
+    (bits[54] as Uint<64>) * 18014398509481984 +
+    (bits[55] as Uint<64>) * 36028797018963968 +
+    (bits[56] as Uint<64>) * 72057594037927936 +
+    (bits[57] as Uint<64>) * 144115188075855872 +
+    (bits[58] as Uint<64>) * 288230376151711744 +
+    (bits[59] as Uint<64>) * 576460752303423488 +
+    (bits[60] as Uint<64>) * 1152921504606846976 +
+    (bits[61] as Uint<64>) * 2305843009213693952 +
+    (bits[62] as Uint<64>) * 4611686018427387904 +
+    (bits[63] as Uint<64>) * 9223372036854775808;
+  assert(value == packed, "random selection bits do not match aggregate hash");
+  const remainder0 = reduceSelectionStep(0 as Uint<64>, bits[63], total);
+  const remainder1 = reduceSelectionStep(remainder0, bits[62], total);
+  const remainder2 = reduceSelectionStep(remainder1, bits[61], total);
+  const remainder3 = reduceSelectionStep(remainder2, bits[60], total);
+  const remainder4 = reduceSelectionStep(remainder3, bits[59], total);
+  const remainder5 = reduceSelectionStep(remainder4, bits[58], total);
+  const remainder6 = reduceSelectionStep(remainder5, bits[57], total);
+  const remainder7 = reduceSelectionStep(remainder6, bits[56], total);
+  const remainder8 = reduceSelectionStep(remainder7, bits[55], total);
+  const remainder9 = reduceSelectionStep(remainder8, bits[54], total);
+  const remainder10 = reduceSelectionStep(remainder9, bits[53], total);
+  const remainder11 = reduceSelectionStep(remainder10, bits[52], total);
+  const remainder12 = reduceSelectionStep(remainder11, bits[51], total);
+  const remainder13 = reduceSelectionStep(remainder12, bits[50], total);
+  const remainder14 = reduceSelectionStep(remainder13, bits[49], total);
+  const remainder15 = reduceSelectionStep(remainder14, bits[48], total);
+  const remainder16 = reduceSelectionStep(remainder15, bits[47], total);
+  const remainder17 = reduceSelectionStep(remainder16, bits[46], total);
+  const remainder18 = reduceSelectionStep(remainder17, bits[45], total);
+  const remainder19 = reduceSelectionStep(remainder18, bits[44], total);
+  const remainder20 = reduceSelectionStep(remainder19, bits[43], total);
+  const remainder21 = reduceSelectionStep(remainder20, bits[42], total);
+  const remainder22 = reduceSelectionStep(remainder21, bits[41], total);
+  const remainder23 = reduceSelectionStep(remainder22, bits[40], total);
+  const remainder24 = reduceSelectionStep(remainder23, bits[39], total);
+  const remainder25 = reduceSelectionStep(remainder24, bits[38], total);
+  const remainder26 = reduceSelectionStep(remainder25, bits[37], total);
+  const remainder27 = reduceSelectionStep(remainder26, bits[36], total);
+  const remainder28 = reduceSelectionStep(remainder27, bits[35], total);
+  const remainder29 = reduceSelectionStep(remainder28, bits[34], total);
+  const remainder30 = reduceSelectionStep(remainder29, bits[33], total);
+  const remainder31 = reduceSelectionStep(remainder30, bits[32], total);
+  const remainder32 = reduceSelectionStep(remainder31, bits[31], total);
+  const remainder33 = reduceSelectionStep(remainder32, bits[30], total);
+  const remainder34 = reduceSelectionStep(remainder33, bits[29], total);
+  const remainder35 = reduceSelectionStep(remainder34, bits[28], total);
+  const remainder36 = reduceSelectionStep(remainder35, bits[27], total);
+  const remainder37 = reduceSelectionStep(remainder36, bits[26], total);
+  const remainder38 = reduceSelectionStep(remainder37, bits[25], total);
+  const remainder39 = reduceSelectionStep(remainder38, bits[24], total);
+  const remainder40 = reduceSelectionStep(remainder39, bits[23], total);
+  const remainder41 = reduceSelectionStep(remainder40, bits[22], total);
+  const remainder42 = reduceSelectionStep(remainder41, bits[21], total);
+  const remainder43 = reduceSelectionStep(remainder42, bits[20], total);
+  const remainder44 = reduceSelectionStep(remainder43, bits[19], total);
+  const remainder45 = reduceSelectionStep(remainder44, bits[18], total);
+  const remainder46 = reduceSelectionStep(remainder45, bits[17], total);
+  const remainder47 = reduceSelectionStep(remainder46, bits[16], total);
+  const remainder48 = reduceSelectionStep(remainder47, bits[15], total);
+  const remainder49 = reduceSelectionStep(remainder48, bits[14], total);
+  const remainder50 = reduceSelectionStep(remainder49, bits[13], total);
+  const remainder51 = reduceSelectionStep(remainder50, bits[12], total);
+  const remainder52 = reduceSelectionStep(remainder51, bits[11], total);
+  const remainder53 = reduceSelectionStep(remainder52, bits[10], total);
+  const remainder54 = reduceSelectionStep(remainder53, bits[9], total);
+  const remainder55 = reduceSelectionStep(remainder54, bits[8], total);
+  const remainder56 = reduceSelectionStep(remainder55, bits[7], total);
+  const remainder57 = reduceSelectionStep(remainder56, bits[6], total);
+  const remainder58 = reduceSelectionStep(remainder57, bits[5], total);
+  const remainder59 = reduceSelectionStep(remainder58, bits[4], total);
+  const remainder60 = reduceSelectionStep(remainder59, bits[3], total);
+  const remainder61 = reduceSelectionStep(remainder60, bits[2], total);
+  const remainder62 = reduceSelectionStep(remainder61, bits[1], total);
+  const remainder63 = reduceSelectionStep(remainder62, bits[0], total);
+  return remainder63;
+}
+
+pure circuit chooseWeighted(first: Bytes<32>, second: Bytes<32>, third: Bytes<32>, fourth: Bytes<32>, fifth: Bytes<32>, firstWeight: Uint<64>, secondWeight: Uint<64>, thirdWeight: Uint<64>, fourthWeight: Uint<64>, ticket: Uint<64>): Bytes<32> {
+  if (disclose(ticket < firstWeight)) { return first; }
+  if (disclose(ticket < firstWeight + secondWeight)) { return second; }
+  if (disclose(ticket < firstWeight + secondWeight + thirdWeight)) { return third; }
+  if (disclose(ticket < firstWeight + secondWeight + thirdWeight + fourthWeight)) { return fourth; }
+  return fifth;
+}
+
+circuit accruedWeight(owner: Bytes<32>, at: Uint<64>): Uint<64> {
+  const balance = principalBalances.lookup(disclose(owner));
+  const stored = participantTwab.lookup(disclose(owner));
+  const updatedAt = participantUpdatedAt.lookup(disclose(owner));
+  assert(disclose(at) >= updatedAt, "TWAB query predates account update");
+  const elapsed = (disclose(at) - updatedAt) as Uint<64>;
+  return (stored + balance * elapsed) as Uint<64>;
+}
+
+circuit recordCurrentTwab(owner: Bytes<32>, now: Uint<64>): Uint<64> {
+  const previous = participantTwab.lookup(disclose(owner));
+  const current = accruedWeight(owner, now);
+  participantTwab.insert(disclose(owner), current);
+  participantUpdatedAt.insert(disclose(owner), disclose(now));
+  totalShareTwab = ((totalShareTwab - previous) + current) as Uint<64>;
+  return current;
+}
+
+circuit drawWeight(owner: Bytes<32>): Uint<64> {
+  const key = drawWeightKey(owner, drawId);
+  if (drawWeightSnapshotKeys.member(disclose(key))) {
+    return drawWeightSnapshots.lookup(disclose(key));
+  }
+  return accruedWeight(owner, drawCutoff);
+}
+
+export circuit contribute(note: Bytes<32>, amount: Uint<64>, now: Uint<64>): [] {
+  if (deployerActive && disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
+  assert(!submissionLocked, "submissions are locked pending deployer removal");
+  assert(!contributionPaused, "contributions paused");
+  assert(!settlementPaused, "settlement paused");
+  assert(disclose(now) < drawCutoff, "contributions close at the draw cutoff");
+  assert(amount >= 1000000 && amount <= 1000000000, "contribution bounds violated");
+  assert(principalReserve + amount <= 10000000000000, "principal custody cap exceeded");
+  const incoming = participant_coin();
+  assert(disclose(incoming.color == assetTokenColor), "contribution token color is not tMIX");
+  assert(disclose(incoming.value == amount), "contribution coin does not match amount");
+  receiveShielded(disclose(incoming));
+  const owner = ownerCommitment(participant_secret(), participant_salt());
+  assert(disclose(note == owner), "private account note does not belong to participant");
+  principalReserve = (principalReserve + disclose(amount)) as Uint<64>;
+  assert(note != pad(32, ""), "private account note required");
+  if (!eligibleParticipantCommitments.member(disclose(owner))) {
+    assert(participantCount < disclosureCohort, "the bounded Preprod cohort is full");
+  }
+  recordCurrentTwab(owner, now);
+  const balance = principalBalances.lookup(disclose(owner));
+  principalBalances.insert(disclose(owner), (balance + disclose(amount)) as Uint<64>);
+  if (!participantCommitments.member(disclose(owner))) {
+    participantCommitments.insert(disclose(owner));
+  }
+  if (!eligibleParticipantCommitments.member(disclose(owner))) {
+    eligibleParticipantCommitments.insert(disclose(owner));
+    participantCount = (participantCount + 1) as Uint<64>;
+  }
+}
+
+export circuit withdraw(amount: Uint<64>, now: Uint<64>): [] {
+  assert(!submissionLocked, "submissions are locked pending deployer removal");
+  assert(!withdrawalPaused, "withdrawals paused");
+  assert(!settlementPaused, "settlement paused");
+  const owner = ownerCommitment(participant_secret(), participant_salt());
+  const balance = principalBalances.lookup(disclose(owner));
+  assert(disclose(amount) > 0 && disclose(amount) <= balance, "withdrawal exceeds participant custody");
+  // A post-cutoff withdrawal must preserve the draw's historical weight before
+  // updating the account's live TWAB checkpoint. Principal remains withdrawable
+  // and the already accrued weight remains eligible for this draw.
+  const snapshotKey = drawWeightKey(owner, drawId);
+  if (disclose(now > drawCutoff) && !drawWeightSnapshotKeys.member(disclose(snapshotKey))) {
+    drawWeightSnapshotKeys.insert(disclose(snapshotKey));
+    drawWeightSnapshots.insert(disclose(snapshotKey), accruedWeight(owner, drawCutoff));
+  }
+  recordCurrentTwab(owner, now);
+  const coin = participant_spendable_coin();
+  assert(disclose(coin.color == assetTokenColor), "withdrawal coin color is not tMIX");
+  assert(disclose(coin.value >= amount), "withdrawal coin is too small");
+  sendShielded(disclose(coin), left<ZswapCoinPublicKey, ContractAddress>(disclose(participant_public_key())), disclose(amount) as Uint<128>);
+  const nextBalance = (balance - disclose(amount)) as Uint<64>;
+  principalBalances.insert(disclose(owner), nextBalance);
+  principalReserve = (principalReserve - disclose(amount)) as Uint<64>;
+}
+
+export circuit finalize(randomnessAggregate: Bytes<32>, cohort: Vector<5, Bytes<32>>, now: Uint<64>): [] {
+  if (deployerActive && disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
+  assert(!settlementPaused, "settlement paused");
+  assert(participantCount == disclosureCohort, "Disclosure Cohort must contain exactly five participants");
+  assert(now >= drawCutoff, "draw cutoff has not elapsed");
+  assert(winningCommitment == pad(32, ""), "draw already finalized");
+  assert(randomnessAggregate != pad(32, ""), "verified randomness aggregate required");
+  const first = cohort[0];
+  const second = cohort[1];
+  const third = cohort[2];
+  const fourth = cohort[3];
+  const fifth = cohort[4];
+  assert(first != pad(32, "") && second != pad(32, "") && third != pad(32, "") && fourth != pad(32, "") && fifth != pad(32, ""), "all cohort commitments are required");
+  assert(first != second && first != third && first != fourth && first != fifth && second != third && second != fourth && second != fifth && third != fourth && third != fifth && fourth != fifth, "cohort commitments must be distinct");
+  assert(eligibleParticipantCommitments.member(disclose(first)), "first cohort participant is not eligible");
+  assert(eligibleParticipantCommitments.member(disclose(second)), "second cohort participant is not eligible");
+  assert(eligibleParticipantCommitments.member(disclose(third)), "third cohort participant is not eligible");
+  assert(eligibleParticipantCommitments.member(disclose(fourth)), "fourth cohort participant is not eligible");
+  assert(eligibleParticipantCommitments.member(disclose(fifth)), "fifth cohort participant is not eligible");
+  const firstWeight = drawWeight(first);
+  const secondWeight = drawWeight(second);
+  const thirdWeight = drawWeight(third);
+  const fourthWeight = drawWeight(fourth);
+  const fifthWeight = drawWeight(fifth);
+  assert(firstWeight > 0 && secondWeight > 0 && thirdWeight > 0 && fourthWeight > 0 && fifthWeight > 0, "all cohort participants need positive accrued weight");
+  const totalWeight = (firstWeight + secondWeight + thirdWeight + fourthWeight + fifthWeight) as Uint<64>;
+  assert(totalWeight > 0, "selection weight is empty");
+  const ticket = selectionIndex(randomnessAggregate, drawId, totalWeight, selection_bits());
+  const selectedOwner = chooseWeighted(first, second, third, fourth, fifth, firstWeight, secondWeight, thirdWeight, fourthWeight, ticket);
+  const selected = winningCommitmentFor(selectedOwner, drawId);
+  winningCommitment = disclose(selected);
+  totalShareTwab = disclose(totalWeight);
+  aggregateDisclosure = persistentHash<[Bytes<32>, Bytes<32>, Bytes<32>, Uint<64>, Uint<64>, Uint<64>]>([pad(32, "Shroudly/aggregate-disclosure/v3"), disclose(randomnessAggregate), disclose(selected), principalReserve, totalWeight, drawId]);
+  unclaimedPrizes.insert(disclose(selected), prizeReserve);
+  prizeReserve = 0;
+  claimDeadline = (disclose(now) + 3600) as Uint<64>;
+}
+
+// A draw below the Disclosure Cohort cannot select or disclose a winner. Its
+// untouched Prize Reserve remains in custody and is carried into the next
+// draw; advancing the draw makes the rollover explicit and permissionless.
+export circuit rolloverSubthreshold(now: Uint<64>): [] {
+  assert(!settlementPaused, "settlement paused");
+  assert(winningCommitment == pad(32, ""), "draw is already finalized");
+  assert(participantCount < disclosureCohort, "Disclosure Cohort is met");
+  assert(now > drawCutoff, "draw cutoff has not elapsed");
+  aggregateDisclosure = persistentHash<[Bytes<32>, Uint<64>, Uint<64>]>([pad(32, "Shroudly/rollover/v1"), drawId, participantCount]);
+  drawId = (drawId + 1) as Uint<64>;
+  drawCutoff = (disclose(now) + 900) as Uint<64>;
+}
+
+export circuit claim(secret: Bytes<32>, salt: Bytes<32>, now: Uint<64>): [] {
+  assert(!settlementPaused, "settlement paused");
+  assert(winningCommitment != pad(32, ""), "draw is not finalized");
+  assert(now <= claimDeadline, "claim window has expired");
+  const owner = ownerCommitment(secret, salt);
+  const nullifier = claimNullifier(owner, drawId, winningCommitment);
+  assert(!claimNullifiers.member(disclose(nullifier)), "claim nullifier already consumed");
+  assert(winningCommitment == winningCommitmentFor(owner, drawId), "private winner ownership proof failed");
+  const payout = unclaimedPrizes.lookup(disclose(winningCommitment));
+  assert(payout > 0, "prize has already been claimed or rolled over");
+  const coin = participant_spendable_coin();
+  assert(disclose(coin.color == assetTokenColor), "claim coin color is not tMIX");
+  assert(disclose(coin.value >= payout), "claim reserve is not funded");
+  sendShielded(disclose(coin), left<ZswapCoinPublicKey, ContractAddress>(disclose(participant_public_key())), disclose(payout) as Uint<128>);
+  unclaimedPrizes.insert(disclose(winningCommitment), 0);
+  paidOutPrizes = (paidOutPrizes + payout) as Uint<64>;
+  claimNullifiers.insert(disclose(nullifier));
+  // A successful claim closes this draw and advances the schedule. The
+  // winner commitment must not remain set, otherwise the next draw could
+  // never pass finalize's "draw already finalized" guard. A fresh reserve can
+  // be supplied through replenishPrizeReserve before that draw settles.
+  winningCommitment = pad(32, "");
+  aggregateDisclosure = pad(32, "");
+  claimDeadline = 0;
+  drawId = (drawId + 1) as Uint<64>;
+  drawCutoff = (disclose(now) + 900) as Uint<64>;
+}
+
+// PrizePool custody is funded with a real shielded tMIX coin. Replenishment
+// is deliberately a governance action and cannot mint, borrow, or inflate the
+// reserve: the witnessed coin must have the immutable deployed tMIX color and
+// exactly match the public accounting increment.
+export circuit replenishPrizeReserve(amount: Uint<64>): [] {
+  assert(!settlementPaused, "settlement paused");
+  assert(twoOfThreeGovernance(), "two-of-three governance is required");
+  assert(amount > 0 && amount <= 1000000000000, "reserve replenishment is bounded");
+  assert(prizeReserve + amount <= 10000000000000, "prize reserve cap exceeded");
+  const incoming = reserve_coin();
+  assert(disclose(incoming.color == assetTokenColor), "reserve coin color is not tMIX");
+  assert(disclose(incoming.value == amount), "reserve coin does not match amount");
+  receiveShielded(disclose(incoming));
+  prizeReserve = (prizeReserve + disclose(amount)) as Uint<64>;
+}
+
+export circuit rolloverExpired(now: Uint<64>): [] {
+  assert(!settlementPaused, "settlement paused");
+  assert(winningCommitment != pad(32, ""), "draw is not finalized");
+  assert(now > claimDeadline, "claim window has not expired");
+  const expired = unclaimedPrizes.lookup(disclose(winningCommitment));
+  assert(expired > 0, "no unclaimed prize remains");
+  unclaimedPrizes.insert(disclose(winningCommitment), 0);
+  prizeReserve = (prizeReserve + expired) as Uint<64>;
+  winningCommitment = pad(32, "");
+  aggregateDisclosure = pad(32, "");
+  claimDeadline = 0;
+  drawId = (drawId + 1) as Uint<64>;
+  drawCutoff = (disclose(now) + 900) as Uint<64>;
+}
+
+export circuit pauseContributions(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); contributionPaused = true; }
+export circuit resumeContributions(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); contributionPaused = false; }
+export circuit pauseWithdrawals(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); withdrawalPaused = true; }
+export circuit resumeWithdrawals(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); withdrawalPaused = false; }
+export circuit pauseSettlement(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); settlementPaused = true; }
+export circuit resumeSettlement(): [] { assert(twoOfThreeGovernance(), "two-of-three governance is required"); settlementPaused = false; }
+export circuit removeDeployer(now: Uint<64>): [] {
+  const caller = authorityCommitment(deployer_secret());
+  assert(disclose(caller == deployerAuthority), "deployer authority is not authenticated");
+  assert(now >= deployerRemovalDeadline, "deployer deadline has not elapsed");
+  if (disclose(now) > deployerRemovalDeadline) { submissionLocked = true; }
+  deployerActive = false;
+}
+
+circuit twoOfThreeGovernance(): Boolean {
+  const one = disclose(authorityCommitment(governance_one_secret()) == governanceOneAuthority);
+  const two = disclose(authorityCommitment(governance_two_secret()) == governanceTwoAuthority);
+  const three = disclose(authorityCommitment(governance_three_secret()) == governanceThreeAuthority);
+  return (one && two) || (one && three) || (two && three);
+}
